@@ -68,6 +68,7 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 	failOn := fs.String("fail-on", "", "exit non-zero when a finding of this severity or worse exists (critical|warning)")
 	configPath := fs.String("config", os.Getenv("HEADROOM_CONFIG"), "path to headroom.yaml (default: discovered next to the plan, then in the working directory)")
 	noConfig := fs.Bool("no-config", false, "ignore any headroom.yaml and run the built-in rules at their defaults")
+	noColor := fs.Bool("no-color", false, "never colour the report (also honoured: NO_COLOR)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return exitError, err
 	}
@@ -138,7 +139,7 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 			return exitError, err
 		}
 	default:
-		report.Text(stdout, findings, planPath)
+		report.Text(stdout, findings, planPath, *noColor)
 	}
 
 	if *failOn != "" && exceeds(findings, *failOn) {
@@ -195,6 +196,9 @@ flags:
   --config F      path to headroom.yaml (default: found next to the plan, then
                   in the working directory; env HEADROOM_CONFIG)
   --no-config     ignore any headroom.yaml and run the built-in defaults
+  --no-color      never colour the report. NO_COLOR in the environment does
+                  the same, and colour is off automatically when stdout is
+                  not a terminal
 
 exit codes:
   0  ran, and nothing matched --fail-on
