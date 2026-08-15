@@ -1,0 +1,64 @@
+name: A number is wrong
+description: A finding quoted a ceiling, a demand or a percentage that is not right
+labels: ["catalog", "priority"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most valuable report this project can receive.
+
+        A capacity report that is confidently wrong costs the person reading it more
+        than no report at all, so a wrong figure is a priority bug and not a nitpick.
+
+  - type: input
+    id: rule
+    attributes:
+      label: Rule id
+      description: The bracketed id in the finding, for example R1, AZ4, GC2.
+      placeholder: R1
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: What headroom printed
+      description: Paste the finding. Redact resource names if you need to.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: expected
+    attributes:
+      label: What the real figure is
+      placeholder: "~682, not 1365"
+    validations:
+      required: true
+
+  - type: input
+    id: source
+    attributes:
+      label: Vendor page that states it
+      description: >
+        A deep link to the page carrying the figure, not a landing page. Official
+        vendor documentation only: no blog posts and no Stack Overflow. If the number
+        has to be derived from that page, say how below.
+      placeholder: https://docs.aws.amazon.com/...#section
+    validations:
+      required: true
+
+  - type: textarea
+    id: derivation
+    attributes:
+      label: How the figure follows from that page
+      description: Only needed if the page does not state it outright.
+
+  - type: input
+    id: version
+    attributes:
+      label: headroom version
+      description: Output of `headroom version`.
+      placeholder: headroom 0.1.0
+    validations:
+      required: true

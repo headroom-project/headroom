@@ -1,0 +1,13 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/headroom-project/headroom/security/advisories/new
+    about: >
+      Private disclosure. Please do not open a public issue for a vulnerability. See
+      SECURITY.md for what is in scope.
+  - name: A ceiling this tool does not know yet
+    url: https://github.com/headroom-project/headroom/issues/new
+    about: >
+      Open a normal issue with the vendor documentation link that states the figure. A
+      rule that cannot ground its numbers stays silent on purpose, so the missing piece
+      is almost always a source rather than code.
