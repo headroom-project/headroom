@@ -1,7 +1,7 @@
 #!/bin/sh
 # headroom installer.
 #
-#   curl -fsSL https://headroom.dev/install.sh | sh
+#   curl -fsSL https://headroomcli.com/install.sh | sh
 #
 # This script downloads a release archive and the published checksums, verifies
 # the archive against them, and only then installs. A pipe into a shell asks you
