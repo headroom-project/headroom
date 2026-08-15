@@ -3,9 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -100,6 +104,34 @@ func TestFailOnTypoIsRejectedRatherThanQuietlyWeakened(t *testing.T) {
 	}
 	if !strings.Contains(r.err.Error(), "warning") || !strings.Contains(r.err.Error(), "critical") {
 		t.Errorf("the error does not name the accepted values: %v", r.err)
+	}
+}
+
+// A flag whose default comes from os.Getenv has that default printed back by
+// PrintDefaults, and PrintDefaults runs on any flag error. So a single mistyped
+// flag used to write HEADROOM_SALT, and later HEADROOM_API_KEY, straight into
+// stderr, which in CI means straight into a log a whole team can read. The
+// environment is read after Parse instead, and this is the test that says so.
+func TestAFlagErrorNeverPrintsASecretFromTheEnvironment(t *testing.T) {
+	t.Setenv("HEADROOM_SALT", "salt-from-the-environment")
+	t.Setenv("HEADROOM_API_KEY", "hr_live_key_from_the_environment")
+
+	r := exec(t, "analyze", "--not-a-flag", fixtureCritical)
+	if r.code != exitError {
+		t.Fatalf("code = %d, want %d", r.code, exitError)
+	}
+	for _, secret := range []string{"salt-from-the-environment", "hr_live_key_from_the_environment"} {
+		if strings.Contains(r.stderr, secret) {
+			t.Errorf("a flag error printed %q from the environment:\n%s", secret, r.stderr)
+		}
+		if strings.Contains(r.stdout, secret) {
+			t.Errorf("a flag error printed %q on stdout", secret)
+		}
+	}
+	// The salt still has to work, or the fix broke the flag it was fixing.
+	ok := exec(t, "analyze", "--dry-run", fixtureCritical)
+	if strings.Contains(ok.stderr, "no salt set") {
+		t.Error("HEADROOM_SALT stopped being read at all")
 	}
 }
 
@@ -360,6 +392,450 @@ func TestUnsaltedDryRunWarnsOnStderr(t *testing.T) {
 	}
 	if strings.Contains(r.stdout, "no salt set") {
 		t.Error("the warning is on stdout, where it would end up inside a redirected payload file")
+	}
+}
+
+// --- upload ---------------------------------------------------------------
+
+// Not one test in this file touches a real network. Every server here is an
+// httptest.Server on loopback, and --api-url is how the CLI is pointed at it.
+
+const testAPIKey = "hr_live_1f4a9c2e7b0d5836"
+
+// recorder is a fake API. It counts requests and keeps the last one, so a test
+// can assert both what was sent and that nothing was sent at all.
+type recorder struct {
+	srv    *httptest.Server
+	calls  int32
+	body   []byte
+	auth   string
+	path   string
+	method string
+}
+
+// newRecorder answers every request with status and body. Status 201 with an
+// empty body gets a plausible one, because that is the common case.
+func newRecorder(t *testing.T, status int, body string) *recorder {
+	t.Helper()
+	rec := &recorder{}
+	rec.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&rec.calls, 1)
+		rec.method, rec.path = r.Method, r.URL.Path
+		rec.auth = r.Header.Get("Authorization")
+		rec.body, _ = io.ReadAll(r.Body)
+		if status == http.StatusCreated && body == "" {
+			body = `{"id":"rep_test","findings_count":5,"created_at":"2026-08-15T09:00:00Z"}`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(rec.srv.Close)
+	return rec
+}
+
+func (r *recorder) count() int { return int(atomic.LoadInt32(&r.calls)) }
+
+// cleanEnv stops a developer's own HEADROOM_* variables from deciding what a
+// test proves.
+func cleanEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"HEADROOM_API_KEY", "HEADROOM_API_URL", "HEADROOM_SALT", "HEADROOM_CONFIG"} {
+		t.Setenv(k, "")
+	}
+}
+
+// The one rule the whole audit story rests on. If the bytes on the wire can
+// differ from the bytes --dry-run prints, then "run --dry-run and you are
+// looking at all of it" is marketing rather than fact. Comparing the two byte
+// sequences is the only assertion that settles it; anything softer would pass
+// while a field quietly diverged.
+func TestUploadedBytesAreExactlyWhatDryRunPrints(t *testing.T) {
+	cleanEnv(t)
+	for _, fixture := range []string{fixtureCritical, fixtureQuiet} {
+		t.Run(filepath.Base(filepath.Dir(fixture)), func(t *testing.T) {
+			rec := newRecorder(t, http.StatusCreated, "")
+
+			dry := exec(t, "analyze", "--dry-run", "--salt", "org-salt", fixture)
+			if dry.code != exitOK {
+				t.Fatalf("--dry-run: code = %d, err = %v", dry.code, dry.err)
+			}
+			up := exec(t, "analyze", "--upload", "--salt", "org-salt",
+				"--api-key", testAPIKey, "--api-url", rec.srv.URL, fixture)
+			if up.code != exitOK {
+				t.Fatalf("--upload: code = %d, err = %v, stderr = %s", up.code, up.err, up.stderr)
+			}
+			if rec.count() != 1 {
+				t.Fatalf("the server saw %d requests, want 1", rec.count())
+			}
+
+			printed, sent := []byte(dry.stdout), rec.body
+			if len(printed) == 0 {
+				t.Fatal("--dry-run printed nothing to compare against")
+			}
+			if bytes.Equal(printed, sent) {
+				return
+			}
+			for i := 0; i < len(printed) && i < len(sent); i++ {
+				if printed[i] != sent[i] {
+					t.Fatalf("printed and uploaded bytes differ at offset %d: printed %q, uploaded %q",
+						i, snippet(printed, i), snippet(sent, i))
+				}
+			}
+			t.Fatalf("printed %d bytes and uploaded %d bytes", len(printed), len(sent))
+		})
+	}
+}
+
+func snippet(b []byte, at int) string {
+	lo, hi := at-20, at+20
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > len(b) {
+		hi = len(b)
+	}
+	return string(b[lo:hi])
+}
+
+// Two flags that mean opposite things must not have a silent winner. Somebody
+// who typed both believed one of them, and guessing which turns a rehearsal into
+// an upload.
+func TestUploadAndDryRunTogetherIsAnExplicitError(t *testing.T) {
+	cleanEnv(t)
+	rec := newRecorder(t, http.StatusCreated, "")
+	for _, order := range [][]string{
+		{"analyze", "--dry-run", "--upload"},
+		{"analyze", "--upload", "--dry-run"},
+	} {
+		args := append(append([]string{}, order...), "--salt", "s", "--api-key", testAPIKey, "--api-url", rec.srv.URL, fixtureCritical)
+		r := exec(t, args...)
+		if r.code != exitError {
+			t.Errorf("%v: code = %d, want %d", order, r.code, exitError)
+		}
+		if r.err == nil || !strings.Contains(r.err.Error(), "--dry-run") || !strings.Contains(r.err.Error(), "--upload") {
+			t.Errorf("%v: the error does not name both flags: %v", order, r.err)
+		}
+	}
+	if rec.count() != 0 {
+		t.Errorf("%d requests were sent by a run that should have refused to start", rec.count())
+	}
+}
+
+// An unsalted payload hashes "aws_db_instance.main" to something a dictionary of
+// a few thousand guesses reverses, and unsalted ids from two organizations
+// collide. --dry-run warns because printing it locally harms nobody. Uploading it
+// is different, so it is refused, and there is deliberately no flag to override
+// the refusal.
+func TestUploadRefusesAnUnsaltedPayloadAndSendsNothing(t *testing.T) {
+	cleanEnv(t)
+	rec := newRecorder(t, http.StatusCreated, "")
+	r := exec(t, "analyze", "--upload", "--api-key", testAPIKey, "--api-url", rec.srv.URL, fixtureCritical)
+	if r.code != exitError {
+		t.Fatalf("code = %d, want %d", r.code, exitError)
+	}
+	if r.err == nil {
+		t.Fatal("no error returned")
+	}
+	// The refusal has to say why, or the next thing the user does is look for
+	// the flag that turns it off.
+	for _, want := range []string{"salt", "reversible", "HEADROOM_SALT"} {
+		if !strings.Contains(r.err.Error(), want) {
+			t.Errorf("the refusal does not mention %q: %v", want, r.err)
+		}
+	}
+	if rec.count() != 0 {
+		t.Errorf("%d requests were sent despite the refusal", rec.count())
+	}
+}
+
+// There is no --allow-unsalted and there must not be one. A flag that disables a
+// privacy control gets pasted into a CI config once and is never revisited, so
+// the control becomes decoration. This test fails the day somebody adds it,
+// which is the point: adding it should require deleting this test and arguing
+// for it in a pull request.
+func TestThereIsNoFlagThatPermitsAnUnsaltedUpload(t *testing.T) {
+	cleanEnv(t)
+	usage := exec(t).stdout
+	for _, forbidden := range []string{"unsalted", "no-salt", "insecure", "force"} {
+		if strings.Contains(strings.ToLower(usage), forbidden) {
+			t.Errorf("the usage text offers %q, which would make the salt optional again", forbidden)
+		}
+	}
+	rec := newRecorder(t, http.StatusCreated, "")
+	for _, flag := range []string{"--allow-unsalted", "--force", "--insecure", "--no-salt"} {
+		r := exec(t, "analyze", "--upload", flag, "--api-key", testAPIKey, "--api-url", rec.srv.URL, fixtureCritical)
+		if r.code != exitError {
+			t.Errorf("%s: code = %d, want %d", flag, r.code, exitError)
+		}
+	}
+	if rec.count() != 0 {
+		t.Errorf("%d requests were sent", rec.count())
+	}
+}
+
+func TestUploadWithoutAnAPIKeyIsRefusedBeforeAnythingIsSent(t *testing.T) {
+	cleanEnv(t)
+	rec := newRecorder(t, http.StatusCreated, "")
+	r := exec(t, "analyze", "--upload", "--salt", "org-salt", "--api-url", rec.srv.URL, fixtureCritical)
+	if r.code != exitError {
+		t.Fatalf("code = %d, want %d", r.code, exitError)
+	}
+	if r.err == nil || !strings.Contains(r.err.Error(), "HEADROOM_API_KEY") {
+		t.Errorf("the error does not say where to put a key: %v", r.err)
+	}
+	if rec.count() != 0 {
+		t.Errorf("%d requests were sent without a key", rec.count())
+	}
+}
+
+// A bearer token in cleartext belongs to whoever is on the path between here and
+// there.
+func TestUploadRefusesACleartextAPIURL(t *testing.T) {
+	cleanEnv(t)
+	r := exec(t, "analyze", "--upload", "--salt", "org-salt", "--api-key", testAPIKey,
+		"--api-url", "http://api.headroomcli.com", fixtureCritical)
+	if r.code != exitError {
+		t.Fatalf("code = %d, want %d", r.code, exitError)
+	}
+	if r.err == nil || !strings.Contains(r.err.Error(), "https") {
+		t.Errorf("the error does not point at https: %v", r.err)
+	}
+}
+
+func TestUploadPostsToTheDocumentedRouteWithABearerToken(t *testing.T) {
+	cleanEnv(t)
+	rec := newRecorder(t, http.StatusCreated, "")
+	r := exec(t, "analyze", "--upload", "--salt", "org-salt",
+		"--api-key", testAPIKey, "--api-url", rec.srv.URL, fixtureCritical)
+	if r.code != exitOK {
+		t.Fatalf("code = %d, err = %v, stderr = %s", r.code, r.err, r.stderr)
+	}
+	if rec.method != http.MethodPost || rec.path != "/v1/reports" {
+		t.Errorf("request = %s %s, want POST /v1/reports", rec.method, rec.path)
+	}
+	if rec.auth != "Bearer "+testAPIKey {
+		t.Errorf("Authorization = %q", rec.auth)
+	}
+}
+
+// The analysis is what the user asked for. It is printed before a socket is
+// opened, so a failed upload costs them a retry and never their report.
+func TestTheLocalReportSurvivesAFailedUpload(t *testing.T) {
+	cleanEnv(t)
+	rec := newRecorder(t, http.StatusInternalServerError, `{"error":{"code":"internal","message":"boom"}}`)
+	r := exec(t, "analyze", "--upload", "--salt", "org-salt",
+		"--api-key", testAPIKey, "--api-url", rec.srv.URL, fixtureCritical)
+
+	if !strings.Contains(r.stdout, "CRITICAL") || !strings.Contains(r.stdout, "aws_db_instance.main") {
+		t.Fatalf("the report is missing from stdout after a failed upload:\n%s", r.stdout)
+	}
+	if r.code != exitError {
+		t.Errorf("code = %d, want %d for a failed upload", r.code, exitError)
+	}
+	if !strings.Contains(r.stderr, "500") {
+		t.Errorf("stderr does not name the status: %q", r.stderr)
+	}
+
+	// And the report a failed upload prints is the report a successful one
+	// prints. The upload is not allowed to change the analysis.
+	ok := newRecorder(t, http.StatusCreated, "")
+	good := exec(t, "analyze", "--upload", "--salt", "org-salt",
+		"--api-key", testAPIKey, "--api-url", ok.srv.URL, fixtureCritical)
+	if good.stdout != r.stdout {
+		t.Error("the local report differs between a successful and a failed upload")
+	}
+}
+
+func TestUploadFailureIsExitTwoAndNamesTheServerErrorCode(t *testing.T) {
+	cleanEnv(t)
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   []string
+	}{
+		{"unauthenticated", 401, `{"error":{"code":"unauthenticated","message":"unknown key"}}`, []string{"401", "unauthenticated"}},
+		{"invalid body", 400, `{"error":{"code":"invalid_body","message":"nodes: required"}}`, []string{"400", "invalid_body"}},
+		{"rate limited", 429, `{"error":{"code":"rate_limited"}}`, []string{"429", "rate_limited"}},
+		{"gateway", 502, `<html>bad gateway</html>`, []string{"502"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := newRecorder(t, tc.status, tc.body)
+			r := exec(t, "analyze", "--upload", "--salt", "org-salt",
+				"--api-key", testAPIKey, "--api-url", rec.srv.URL, fixtureQuiet)
+			if r.code != exitError {
+				t.Fatalf("code = %d, want %d", r.code, exitError)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(r.stderr, want) {
+					t.Errorf("stderr %q does not mention %q", r.stderr, want)
+				}
+			}
+		})
+	}
+}
+
+// The precedence, which is the whole question when both apply.
+//
+// --fail-on asks about capacity. The network is not capacity. Exit 2 means
+// "could not run", and the advice this project gives about "could not run" is to
+// carry on, so letting 2 win would dress a real critical finding in the one
+// label that invites a pipeline to ignore it. The gate wins; the upload failure
+// is still on stderr.
+func TestAnUploadFailureNeverOverturnsTheFailOnVerdict(t *testing.T) {
+	cleanEnv(t)
+	cases := []struct {
+		name     string
+		fixture  string
+		failOn   []string
+		status   int
+		wantCode int
+	}{
+		{"gate fires and the upload fails", fixtureCritical, []string{"--fail-on", "critical"}, 500, exitFinding},
+		{"gate fires and the upload works", fixtureCritical, []string{"--fail-on", "critical"}, 201, exitFinding},
+		{"gate is quiet and the upload fails", fixtureQuiet, []string{"--fail-on", "critical"}, 500, exitError},
+		{"gate is quiet and the upload works", fixtureQuiet, []string{"--fail-on", "critical"}, 201, exitOK},
+		{"no gate and the upload fails", fixtureCritical, nil, 500, exitError},
+		{"no gate and the upload works", fixtureCritical, nil, 201, exitOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := newRecorder(t, tc.status, "")
+			args := append([]string{"analyze", "--upload", "--salt", "org-salt",
+				"--api-key", testAPIKey, "--api-url", rec.srv.URL}, tc.failOn...)
+			r := exec(t, append(args, tc.fixture)...)
+			if r.code != tc.wantCode {
+				t.Fatalf("code = %d, want %d (stderr: %s)", r.code, tc.wantCode, r.stderr)
+			}
+			// A failure that changes nothing about the exit code still has to be
+			// visible, or a broken upload goes unnoticed for a month.
+			if tc.status != 201 && !strings.Contains(r.stderr, "upload failed") {
+				t.Errorf("stderr does not report the failed upload: %q", r.stderr)
+			}
+		})
+	}
+}
+
+// The key is a credential. It has no business in a payload, in a report, in an
+// error, or in the usage text that a flag error prints.
+func TestTheAPIKeyNeverAppearsInAnyOutput(t *testing.T) {
+	cleanEnv(t)
+	// A hostile or merely careless server echoing the header back is the
+	// realistic way a key reaches a CI log.
+	rec := newRecorder(t, http.StatusUnauthorized,
+		`{"error":{"code":"unauthenticated","message":"Bearer `+testAPIKey+` is not a key"}}`)
+
+	runs := []result{
+		exec(t, "analyze", "--upload", "--salt", "org-salt", "--api-key", testAPIKey, "--api-url", rec.srv.URL, fixtureCritical),
+		exec(t, "analyze", "--upload", "--json", "--salt", "org-salt", "--api-key", testAPIKey, "--api-url", rec.srv.URL, fixtureCritical),
+	}
+	for _, r := range runs {
+		if strings.Contains(r.stdout, testAPIKey) {
+			t.Error("the API key is on stdout")
+		}
+		if strings.Contains(r.stderr, testAPIKey) {
+			t.Errorf("the API key is on stderr: %q", r.stderr)
+		}
+		if r.err != nil && strings.Contains(r.err.Error(), testAPIKey) {
+			t.Errorf("the API key is in the returned error: %v", r.err)
+		}
+	}
+	if bytes.Contains(rec.body, []byte(testAPIKey)) {
+		t.Error("the API key is inside the uploaded payload")
+	}
+
+}
+
+// The environment is what CI has instead of a command line, and an explicit flag
+// still wins over it.
+func TestUploadReadsTheEnvironmentAndTheFlagWins(t *testing.T) {
+	cleanEnv(t)
+	wrong := newRecorder(t, http.StatusInternalServerError, "")
+	right := newRecorder(t, http.StatusCreated, "")
+
+	t.Setenv("HEADROOM_API_KEY", testAPIKey)
+	t.Setenv("HEADROOM_SALT", "org-salt")
+	t.Setenv("HEADROOM_API_URL", right.srv.URL)
+
+	r := exec(t, "analyze", "--upload", fixtureQuiet)
+	if r.code != exitOK {
+		t.Fatalf("code = %d, err = %v, stderr = %s", r.code, r.err, r.stderr)
+	}
+	if right.count() != 1 || right.auth != "Bearer "+testAPIKey {
+		t.Errorf("the environment was not used: %d calls, auth %q", right.count(), right.auth)
+	}
+
+	t.Setenv("HEADROOM_API_URL", wrong.srv.URL)
+	r = exec(t, "analyze", "--upload", "--api-url", right.srv.URL, fixtureQuiet)
+	if r.code != exitOK {
+		t.Fatalf("code = %d, stderr = %s", r.code, r.stderr)
+	}
+	if wrong.count() != 0 {
+		t.Error("--api-url did not win over HEADROOM_API_URL")
+	}
+	if right.count() != 2 {
+		t.Errorf("the flag URL got %d calls, want 2", right.count())
+	}
+}
+
+// stdout belongs to the report. A confirmation line on it would end up inside a
+// redirected --json file and break whatever reads it.
+func TestUploadConfirmationGoesToStderrAndLeavesJSONOnStdoutValid(t *testing.T) {
+	cleanEnv(t)
+	rec := newRecorder(t, http.StatusCreated, "")
+	r := exec(t, "analyze", "--upload", "--json", "--salt", "org-salt",
+		"--api-key", testAPIKey, "--api-url", rec.srv.URL, fixtureCritical)
+	if r.code != exitOK {
+		t.Fatalf("code = %d, err = %v", r.code, r.err)
+	}
+	if !strings.Contains(r.stderr, "rep_test") {
+		t.Errorf("stderr does not confirm the upload: %q", r.stderr)
+	}
+	if strings.Contains(r.stdout, "rep_test") || strings.Contains(r.stdout, "uploaded") {
+		t.Error("the upload confirmation is on stdout")
+	}
+	var findings []map[string]any
+	if err := json.Unmarshal([]byte(r.stdout), &findings); err != nil {
+		t.Fatalf("--json --upload did not leave valid JSON on stdout: %v", err)
+	}
+}
+
+// Without --upload nothing is sent, whatever else is on the command line. This
+// is the README's claim, and until this milestone it was true only because the
+// capability did not exist.
+func TestNothingIsSentWithoutTheUploadFlag(t *testing.T) {
+	cleanEnv(t)
+	rec := newRecorder(t, http.StatusCreated, "")
+	for _, mode := range [][]string{
+		nil,
+		{"--json"},
+		{"--dry-run", "--salt", "org-salt"},
+	} {
+		args := []string{"analyze"}
+		args = append(args, mode...)
+		args = append(args, "--api-key", testAPIKey, "--api-url", rec.srv.URL, fixtureCritical)
+		if r := exec(t, args...); r.code != exitOK {
+			t.Fatalf("%v: code = %d, err = %v", mode, r.code, r.err)
+		}
+	}
+	if rec.count() != 0 {
+		t.Errorf("%d requests were sent without --upload", rec.count())
+	}
+}
+
+func TestUsageDocumentsUploadAndItsExitCode(t *testing.T) {
+	usage := exec(t).stdout
+	for _, want := range []string{"--upload", "--api-key", "--api-url", "HEADROOM_API_KEY", "--upload failed"} {
+		if !strings.Contains(usage, want) {
+			t.Errorf("the usage text does not mention %q", want)
+		}
+	}
+	// Spelled as an escape so this assertion does not itself put the character
+	// it forbids into the source.
+	if strings.ContainsRune(usage, '\u2014') {
+		t.Error("the usage text contains an em-dash")
 	}
 }
 
