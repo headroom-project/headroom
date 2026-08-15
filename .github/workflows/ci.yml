@@ -24,9 +24,9 @@ jobs:
         # all three rather than on the one that is cheapest.
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           check-latest: true
@@ -56,7 +56,7 @@ jobs:
 
       - name: upload coverage
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage
           path: coverage.out
@@ -66,9 +66,9 @@ jobs:
     name: cross build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           check-latest: true
@@ -84,11 +84,42 @@ jobs:
             echo "ok $target"
           done
 
+  fuzz:
+    name: fuzz the parser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # The plan JSON is the one input this tool does not produce itself: it
+      # arrives from a customer's repository. Every other job runs the seed
+      # corpus as ordinary tests; this is the only place mutation actually
+      # happens. Short on a pull request so it does not become the reason
+      # nobody merges, and if it ever finds something the crasher is uploaded
+      # rather than lost with the runner.
+      - name: fuzz Parse
+        run: go test -run=NONE -fuzz=FuzzParse -fuzztime=90s ./internal/plan
+
+      - name: fuzz Base
+        run: go test -run=NONE -fuzz=FuzzBase -fuzztime=30s ./internal/plan
+
+      - name: upload any crasher
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-crashers
+          path: internal/plan/testdata/fuzz/
+          retention-days: 30
+
   action-refs:
     name: action refs resolve
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # `goreleaser check` validates the release config and says nothing about
       # whether the release workflow's own actions exist. That gap is not
@@ -126,17 +157,17 @@ jobs:
     name: goreleaser config
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
       # Catches a broken release config on the pull request instead of on the
       # tag, where the only fix is a second tag.
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           distribution: goreleaser
           version: "~> v2"
