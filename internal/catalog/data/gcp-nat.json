@@ -1,0 +1,35 @@
+{
+  "provider": "gcp",
+  "domain": "nat",
+  "updated_at": "2026-08-14",
+  "_discipline": "No entry ships without source + verified_at + confidence. A wrong number in a capacity report costs the whole customer, so an absent ceiling is always better than an uncertain one: rules must skip what they cannot ground.",
+
+  "public_nat": {
+    "ports_per_ip": 64512,
+    "default_min_ports_per_vm": 64,
+    "formula": "vms = floor(nat_ip_count * 64512 / min_ports_per_vm)",
+    "source": "https://docs.cloud.google.com/nat/docs/ports-and-addresses",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "Each NAT IP address offers 64512 TCP source ports and 64512 UDP source ports. Public NAT uses static port allocation by default and reserves min_ports_per_vm for every VM whether it uses them or not, so the ports are spent at placement time and not at connection time. Google's own worked example is one IP at the default 64 ports per VM = 1008 VMs. Raising min_ports_per_vm to stop port exhaustion inside a busy VM divides the number of VMs the gateway can serve by the same factor, and nothing in the plan connects the two."
+  },
+
+  "private_nat": {
+    "ports_per_ip": 64512,
+    "default_min_ports_per_vm": 32,
+    "port_multiplier": 2,
+    "formula": "vms = floor(nat_ip_count * 64512 / (min_ports_per_vm * 2))",
+    "source": "https://docs.cloud.google.com/nat/docs/ports-and-addresses",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "Private NAT defaults to dynamic port allocation at 32 ports per VM, and Google allocates twice the required minimum ports per VM for reliability, hence the multiplier. Each NAT IP offers the same 64,512 TCP and 64,512 UDP source ports as Public NAT, so the effective VM count per IP is halved relative to the naive division.",
+    "verification": "Both numbers CONFIRMED against the source on 2026-08-14 and confidence raised medium -> high, because the page states each directly. Default of 32: 'Dynamic port allocation is enabled, by default, for Private NAT', and where no minimum is specified 'the default value is used: ... 32 for dynamic port allocation'. Multiplier of 2: 'For Private NAT, Google Cloud allocates twice the number of required minimum ports per VM for reliability.' Ports per IP: 'Each NAT IP address on a Cloud NAT gateway (both Public NAT and Private NAT) offers 64,512 TCP source ports and 64,512 UDP source ports.' The previous medium grade was not a sourcing doubt; it recorded that the rule had never been exercised against a private NAT plan. That is a test-coverage gap, not a catalog uncertainty, and it is still open: no fixture covers Private NAT. Confidence tracks the source, so the gap is recorded here instead of suppressing the grade."
+  },
+
+  "auto_allocation": {
+    "skip_reason": "nat_ip_allocate_option = AUTO_ONLY means Google adds NAT IP addresses as the gateway needs them, so there is no fixed port ceiling to compare against and the rule stays silent. The trade is that the external addresses are not stable, which is a different problem from this one.",
+    "source": "https://docs.cloud.google.com/nat/docs/ports-and-addresses",
+    "verified_at": "2026-08-14",
+    "confidence": "high"
+  }
+}

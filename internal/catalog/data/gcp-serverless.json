@@ -1,0 +1,32 @@
+{
+  "provider": "gcp",
+  "domain": "serverless",
+  "updated_at": "2026-08-14",
+  "_discipline": "No entry ships without source + verified_at + confidence. A wrong number in a capacity report costs the whole customer, so an absent ceiling is always better than an uncertain one: rules must skip what they cannot ground.",
+
+  "vpc_access_connector": {
+    "min_instances_floor": 2,
+    "max_instances_ceiling": 10,
+    "default_min_instances": 2,
+    "default_max_instances": 10,
+    "source": "https://docs.cloud.google.com/vpc/docs/serverless-vpc-access",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "The throughput figures Google publishes are ranges, explicitly labelled estimates for regular operation rather than guarantees, which is why the rule that uses them never reports critical: it states the aggregate the connector is estimated to carry and how thin that gets per consumer instance, and lets the reader decide. Rules must quote the low end of the range and never the high end. An e2-micro connector is a 200 Mbps device that occasionally reaches 1000.",
+    "verification": "Re-read against the source on 2026-08-14. Every figure matched and none was corrected. The published table is 'Machine type | Estimated throughput range in Mbps': f1-micro 100-500, e2-micro 200-1000, e2-standard-4 3200-16000. Instance range confirmed: 'The minimum must be at least 2. The maximum can be at most 10, and must be larger than the minimum.' Estimate caveat confirmed: 'Maximum throughput ranges are estimates based on regular operation. Actual throughput depends on many factors.' Confidence raised medium -> high because the page states these numbers directly, which is what the grade means in this catalog. It does NOT mean the numbers are guarantees; that uncertainty is real, but it lives in the values rather than in the sourcing, so it is stated in the finding instead of being smuggled in as a suppressed grade.",
+    "machine_types": {
+      "f1-micro": { "min_mbps": 100, "max_mbps": 500 },
+      "e2-micro": { "min_mbps": 200, "max_mbps": 1000 },
+      "e2-standard-4": { "min_mbps": 3200, "max_mbps": 16000 }
+    },
+    "sizing_notes": "The connector is sized at creation: its machine type, its instance range and its /28 are all set once. Everything a Cloud Run service or a Cloud Function sends into the VPC crosses it, and the consumer autoscales while the connector does not go past max_instances, which itself cannot exceed 10."
+  },
+
+  "cloud_run": {
+    "default_max_instance_count": 100,
+    "source": "https://docs.cloud.google.com/run/docs/configuring/max-instances",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "Every revision gets a maximum instance limit whether or not the author set one, and the default is 100. This is the number that matters for anything downstream: a Cloud Run service with no scaling block in the terraform is not a one-instance service, it is a hundred-instance service that happens to be idle. The catalog encodes it so a plan that says nothing about scaling still produces a grounded demand figure."
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "provider": "azure",
+  "domain": "mysql-flexible-server",
+  "updated_at": "2026-08-14",
+
+  "source": "https://learn.microsoft.com/en-us/azure/mysql/flexible-server/concepts-server-parameters#max_connections",
+  "secondary_source": "https://learn.microsoft.com/en-us/azure/mysql/flexible-server/concepts-service-tiers-storage#burstable",
+  "verified_at": "2026-08-14",
+  "confidence": "high",
+  "reserved_connections": 0,
+  "notes": "These are Microsoft's documented DEFAULT values of max_connections for each compute size. Unlike PostgreSQL flexible server, MySQL flexible server lets you raise max_connections, to exactly twice the default on every documented size, so this is the number a plan gets rather than a hard ceiling and the finding must say so. No connections are documented as reserved, so max_user_connections mirrors max_connections.",
+  "verification": "Read from the 'max_connections' table under Server Parameters, revised 2025-11-25, and re-read in full on 2026-08-14: every value in this file matched the 'Default value' column and none was corrected. Microsoft's 'Max value' column is exactly 2x the default on every row, which confirms that the 'roughly twice' claim was not folklore. Beware a second Microsoft table that looks like it contradicts this one: concepts-service-tiers-storage has a 'Max Connections' column reading 341 for B1ms, 683 for B2s, 1365 for B2ms and so on. It is not a contradiction and must not be used to 'fix' this file. It is the same series shifted one row because it prints the MAXIMUM, matching the 'Max value' column here, while this file encodes the DEFAULT. Not encoded: Standard_D96ads_v5 (96 vCores, 384 GiB) appears in the service tiers table with a maximum of 65536, implying a default of 32768, but it is absent from the max_connections table, so the default is inferred rather than published and is left out.",
+
+  "b2ms_resolution": {
+    "question": "Microsoft lists Standard_B2ms as 4 GB on one page and 8 GiB on another. Which is right?",
+    "answer": "8 GiB. The catalog's memory_gib of 8 is correct and stays. The '4' is a typo in one table.",
+    "evidence": "Three independent Microsoft statements say 8 and one says 4. (1) The service tiers article's Burstable table gives Standard_B2ms as 2 vCores, Physical Memory Size 8 GiB, Total Memory Size 8.8 GiB. (2) The innodb_buffer_pool_size table, on the very same page as the disputed max_connections table, gives Standard_B2ms Physical memory size 8 GB with a default buffer pool of 4294967296 bytes, which is 4 GiB, i.e. the half-of-memory ratio that page applies to every other burstable size (B2s: 4 GB memory, 2147483648 byte = 2 GiB pool). At 4 GB of memory B2ms would be indistinguishable from B2s, which it is not. (3) The connections column itself: across all 40-odd rows the default tracks memory at a constant ~85.3 connections per GB (1 GB -> 85, 2 -> 171, 4 -> 341, 16 -> 1365, 32 -> 2731, 64 -> 5461). B2ms's documented 683 is 8 x 85.3, not 4 x 85.3, so the connection figure is the one consistent with 8 GiB and the memory cell is the outlier. This is the point the audit flagged as 'the connection count tracks memory everywhere else' and it resolves the contradiction rather than merely recording it.",
+    "contradicting_pages": [
+      "https://learn.microsoft.com/en-us/azure/mysql/flexible-server/concepts-server-parameters#max_connections says 4 (the max_connections table's 'Physical memory size (GB)' cell for Standard_B2ms). This is the erroneous one.",
+      "https://learn.microsoft.com/en-us/azure/mysql/flexible-server/concepts-server-parameters#innodb_buffer_pool_size says 8, on the same page.",
+      "https://learn.microsoft.com/en-us/azure/mysql/flexible-server/concepts-service-tiers-storage#burstable says 8 GiB physical / 8.8 GiB total."
+    ],
+    "impact": "None on any reported ceiling. max_connections for B2ms is 683 either way, because the connection value is quoted as printed and never derived from memory_gib in this file. The memory field is metadata used for explaining the finding, so getting it wrong would have produced a confusing sentence rather than a wrong number. Fixing it costs nothing and removes a landmine for whoever next tries to re-derive the table from memory.",
+    "verified_at": "2026-08-14",
+    "confidence": "high"
+  },
+
+  "sku_notes": "Keyed by the Azure compute size with the Standard_ prefix removed, the same shape as azure-postgresql.json. Values are Microsoft's documented DEFAULTS, not maximums.",
+
+  "skus": {
+    "B1s":   {"vcores": 1,  "memory_gib": 1,  "max_connections": 85,   "max_user_connections": 85},
+    "B1ms":  {"vcores": 1,  "memory_gib": 2,  "max_connections": 171,  "max_user_connections": 171},
+    "B2s":   {"vcores": 2,  "memory_gib": 4,  "max_connections": 341,  "max_user_connections": 341},
+    "B2ms":  {"vcores": 2,  "memory_gib": 8,  "max_connections": 683,  "max_user_connections": 683},
+    "B4ms":  {"vcores": 4,  "memory_gib": 16, "max_connections": 1365, "max_user_connections": 1365},
+    "B8ms":  {"vcores": 8,  "memory_gib": 32, "max_connections": 2731, "max_user_connections": 2731},
+    "B12ms": {"vcores": 12, "memory_gib": 48, "max_connections": 4097, "max_user_connections": 4097},
+    "B16ms": {"vcores": 16, "memory_gib": 64, "max_connections": 5461, "max_user_connections": 5461},
+    "B20ms": {"vcores": 20, "memory_gib": 80, "max_connections": 6827, "max_user_connections": 6827},
+
+    "D2ds_v4":   {"vcores": 2,  "memory_gib": 8,   "max_connections": 683,   "max_user_connections": 683},
+    "D2ads_v5":  {"vcores": 2,  "memory_gib": 8,   "max_connections": 683,   "max_user_connections": 683},
+    "D4ds_v4":   {"vcores": 4,  "memory_gib": 16,  "max_connections": 1365,  "max_user_connections": 1365},
+    "D4ads_v5":  {"vcores": 4,  "memory_gib": 16,  "max_connections": 1365,  "max_user_connections": 1365},
+    "D8ds_v4":   {"vcores": 8,  "memory_gib": 32,  "max_connections": 2731,  "max_user_connections": 2731},
+    "D8ads_v5":  {"vcores": 8,  "memory_gib": 32,  "max_connections": 2731,  "max_user_connections": 2731},
+    "D16ds_v4":  {"vcores": 16, "memory_gib": 64,  "max_connections": 5461,  "max_user_connections": 5461},
+    "D16ads_v5": {"vcores": 16, "memory_gib": 64,  "max_connections": 5461,  "max_user_connections": 5461},
+    "D32ds_v4":  {"vcores": 32, "memory_gib": 128, "max_connections": 10923, "max_user_connections": 10923},
+    "D32ads_v5": {"vcores": 32, "memory_gib": 128, "max_connections": 10923, "max_user_connections": 10923},
+    "D48ds_v4":  {"vcores": 48, "memory_gib": 192, "max_connections": 16384, "max_user_connections": 16384},
+    "D48ads_v5": {"vcores": 48, "memory_gib": 192, "max_connections": 16384, "max_user_connections": 16384},
+    "D64ds_v4":  {"vcores": 64, "memory_gib": 256, "max_connections": 21845, "max_user_connections": 21845},
+    "D64ads_v5": {"vcores": 64, "memory_gib": 256, "max_connections": 21845, "max_user_connections": 21845},
+
+    "E2ds_v4":   {"vcores": 2,  "memory_gib": 16,  "max_connections": 1365,  "max_user_connections": 1365},
+    "E2ds_v5":   {"vcores": 2,  "memory_gib": 16,  "max_connections": 1365,  "max_user_connections": 1365},
+    "E2ads_v5":  {"vcores": 2,  "memory_gib": 16,  "max_connections": 1365,  "max_user_connections": 1365},
+    "E4ds_v4":   {"vcores": 4,  "memory_gib": 32,  "max_connections": 2731,  "max_user_connections": 2731},
+    "E4ds_v5":   {"vcores": 4,  "memory_gib": 32,  "max_connections": 2731,  "max_user_connections": 2731},
+    "E4ads_v5":  {"vcores": 4,  "memory_gib": 32,  "max_connections": 2731,  "max_user_connections": 2731},
+    "E8ds_v4":   {"vcores": 8,  "memory_gib": 64,  "max_connections": 5461,  "max_user_connections": 5461},
+    "E8ds_v5":   {"vcores": 8,  "memory_gib": 64,  "max_connections": 5461,  "max_user_connections": 5461},
+    "E8ads_v5":  {"vcores": 8,  "memory_gib": 64,  "max_connections": 5461,  "max_user_connections": 5461},
+    "E16ds_v4":  {"vcores": 16, "memory_gib": 128, "max_connections": 10923, "max_user_connections": 10923},
+    "E16ds_v5":  {"vcores": 16, "memory_gib": 128, "max_connections": 10923, "max_user_connections": 10923},
+    "E16ads_v5": {"vcores": 16, "memory_gib": 128, "max_connections": 10923, "max_user_connections": 10923},
+    "E20ds_v4":  {"vcores": 20, "memory_gib": 160, "max_connections": 13653, "max_user_connections": 13653},
+    "E20ds_v5":  {"vcores": 20, "memory_gib": 160, "max_connections": 13653, "max_user_connections": 13653},
+    "E20ads_v5": {"vcores": 20, "memory_gib": 160, "max_connections": 13653, "max_user_connections": 13653},
+    "E32ds_v4":  {"vcores": 32, "memory_gib": 256, "max_connections": 21845, "max_user_connections": 21845},
+    "E32ds_v5":  {"vcores": 32, "memory_gib": 256, "max_connections": 21845, "max_user_connections": 21845},
+    "E32ads_v5": {"vcores": 32, "memory_gib": 256, "max_connections": 21845, "max_user_connections": 21845},
+    "E48ds_v4":  {"vcores": 48, "memory_gib": 384, "max_connections": 32768, "max_user_connections": 32768},
+    "E48ds_v5":  {"vcores": 48, "memory_gib": 384, "max_connections": 32768, "max_user_connections": 32768},
+    "E48ads_v5": {"vcores": 48, "memory_gib": 384, "max_connections": 32768, "max_user_connections": 32768},
+    "E64ds_v4":  {"vcores": 64, "memory_gib": 504, "max_connections": 43008, "max_user_connections": 43008},
+    "E64ds_v5":  {"vcores": 64, "memory_gib": 512, "max_connections": 43691, "max_user_connections": 43691},
+    "E64ads_v5": {"vcores": 64, "memory_gib": 512, "max_connections": 43691, "max_user_connections": 43691},
+    "E80ids_v4": {"vcores": 80, "memory_gib": 504, "max_connections": 43008, "max_user_connections": 43008},
+    "E96ds_v5":  {"vcores": 96, "memory_gib": 672, "max_connections": 50000, "max_user_connections": 50000}
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "provider": "gcp",
+  "domain": "cloudsql",
+  "updated_at": "2026-08-14",
+  "_discipline": "No entry ships without source + verified_at + confidence. A wrong number in a capacity report costs the whole customer, so an absent ceiling is always better than an uncertain one: rules must skip what they cannot ground.",
+
+  "max_connections": {
+    "postgres": {
+      "source": "https://docs.cloud.google.com/sql/docs/postgres/flags#postgres-m",
+      "verified_at": "2026-08-14",
+      "confidence": "high",
+      "formula": "banded on the memory of the largest instance in the chain of primaries",
+      "notes": "Read from the live max_connections row of the Cloud SQL for PostgreSQL flags page on 2026-08-14. The published table is expressed in GB; the bands below are in MB using 1 GB = 1024 MB, which is the convention the tier string itself uses (db-custom-2-7680 is documented as 7.5 GB). Google states the default depends on the largest instance in the replication chain, so a small primary with a large replica lands higher than this; the rule reports the primary it can see. Anything the customer sets through the max_connections database flag overrides all of it, and unlike RDS parameter groups the plan does reveal database_flags, so the rule prefers the declared value over this table whenever one is present.",
+      "shared_core": {
+        "db-f1-micro": 25,
+        "db-g1-small": 50
+      },
+      "bands": [
+        { "min_mb": 3840, "max_mb": 6144, "value": 100 },
+        { "min_mb": 6144, "max_mb": 7680, "value": 200 },
+        { "min_mb": 7680, "max_mb": 15360, "value": 400 },
+        { "min_mb": 15360, "max_mb": 30720, "value": 500 },
+        { "min_mb": 30720, "max_mb": 61440, "value": 600 },
+        { "min_mb": 61440, "max_mb": 122880, "value": 800 },
+        { "min_mb": 122880, "max_mb": 0, "value": 1000 }
+      ],
+      "gap_notes": "RE-CHECKED 2026-08-14: the hole is still there, so nothing changes. The live table reads 'tiny (~0.5) 25 / small (~1.7) 50 / from 3.75 to < 6 100 / from 6 to < 7.5 200 / from 7.5 to < 15 400 / from 15 to < 30 500 / from 30 to < 60 600 / from 60 to < 120 800 / >=120 1,000'. It jumps from 'small (~1.7)' straight to 'from 3.75', so memory strictly between 1700 MB and 3840 MB is undocumented and remains deliberately not encoded: the rule stays silent for those tiers rather than interpolating. Every band above was also re-read and all seven matched, as did both shared-core values.",
+      "band_verification": "The bands are the published GB ranges converted at 1 GB = 1024 MB: 3.75 GB = 3840, 6 = 6144, 7.5 = 7680, 15 = 15360, 30 = 30720, 60 = 61440, 120 = 122880. Confirmed unchanged on 2026-08-14."
+    }
+  },
+
+  "_mysql_gap_verification": {
+    "status": "SETTLED 2026-08-14. Do not reopen without new evidence; this is the second pass to reach the same conclusion.",
+    "pages_checked": [
+      "https://docs.cloud.google.com/sql/docs/mysql/flags - documents no max_connections default and no memory-to-connections table. Says only 'To view all current values of the MySQL system variables, log into your instance with the mysql client and enter the following statement: SHOW VARIABLES;'",
+      "https://docs.cloud.google.com/sql/docs/mysql/quotas - no table either: 'You can find the connections limit for your instance by connecting to your database and running this command: SHOW VARIABLES LIKE \"max_connections\";'. It states that the machine type determines available memory and that memory determines the connection limit, but publishes no mapping between them.",
+      "https://docs.cloud.google.com/sql/docs/postgres/flags - checked for contrast, and it DOES print the memory-band table this file encodes for postgres. The asymmetry is Google's, not an omission in this research."
+    ],
+    "why_upstream_mysql_does_not_help": "dev.mysql.com documents a fixed compiled-in default for max_connections rather than a memory-derived one, and Cloud SQL overrides it on every instance. Importing an upstream figure would produce a confidently wrong ceiling instead of a missing one, which is the trade this catalog exists to refuse.",
+    "what_would_close_it": "Not a documentation page. The value is only knowable per instance, either from SHOW VARIABLES on the running server or from the Cloud SQL Admin API. Both are runtime lookups and neither is available at plan time, so this is a permanent gap for a plan-file tool rather than a research backlog item."
+  },
+
+  "unsupported_engines": {
+    "mysql": "Cloud SQL for MySQL derives max_connections from instance memory, but Google publishes no memory-to-connections table for it: both the MySQL flags page and the MySQL quotas page tell you to read the value off the running instance with SHOW VARIABLES LIKE \"max_connections\" instead. Cloud SQL for PostgreSQL does publish that table, which is why this rule can ground a PostgreSQL instance and not a MySQL one. Encoding a number here would be a guess, so the rule reports nothing.",
+    "sqlserver": "Cloud SQL for SQL Server governs concurrency through worker threads rather than a memory-derived max_connections, and Google publishes no table. Not encoded."
+  },
+
+  "tiers": {
+    "_source": "https://docs.cloud.google.com/sql/docs/postgres/machine-series-overview",
+    "_verified_at": "2026-08-14",
+    "_confidence": "high",
+    "_notes": "Cloud SQL puts the memory in the tier string, which is the one place GCP is kinder than AWS: db-custom-{vCPUs}-{memoryMB} states it outright, so no lookup table is needed for the custom family. Only the fixed families need encoding.",
+
+    "custom_prefix": "db-custom-",
+    "custom_notes": "db-custom-2-7680 is 2 vCPUs and 7680 MB, documented as 7.5 GB. The memory component is always MB.",
+
+    "shared_core_mb": {
+      "db-f1-micro": 614,
+      "db-g1-small": 1700
+    },
+
+    "predefined_mb_per_vcpu": {
+      "db-perf-optimized-n-": 8192
+    },
+    "predefined_notes": "db-perf-optimized-N-{vCPUs} is the Enterprise Plus N2 series at a documented 1 vCPU : 8 GB ratio (db-perf-optimized-N-2 is 16 GB, db-perf-optimized-N-96 is 768 GB). db-perf-optimized-N-128 is the documented exception at 6.75 GB per vCPU and is listed separately below.",
+
+    "explicit_mb": {
+      "db-perf-optimized-n-128": 884736
+    },
+    "explicit_notes": "db-perf-optimized-N-128 is documented as the one member of the family at 6.75 GB per vCPU: 128 x 6.75 GB = 864 GB = 884736 MB. Derived arithmetic from the published ratio, not a quoted figure, so treat it as medium confidence.",
+
+    "_n1_gap_verification": {
+      "status": "Searched again 2026-08-14. Still not encodable.",
+      "pages_checked": [
+        "https://docs.cloud.google.com/compute/docs/general-purpose-machines - no N1 specification table. Its tables cover C4D, C4A, C4, N4D, N4A, N4, C3, C3D, E2 and T2A/T2D. N1 appears only in prose: 'N1 and its related shared-core machine types are the first generation machine series.'",
+        "https://docs.cloud.google.com/compute/docs/machine-resource - the machine families comparison guide carries no N1 rows either, mentioning N1 only as 'the older version of the N2 series' and naming f1-micro and g1-small."
+      ],
+      "why_not_interpolated": "The widely repeated 3.75 GB per vCPU for n1-standard is exactly the kind of figure this catalog refuses to ship from recall. It is very probably right, and 'very probably' is not a ceiling.",
+      "scope_of_the_gap": "Only the sized N1 tiers. Google does still document the shared-core memory this file encodes for db-f1-micro and db-g1-small.",
+      "consequence": "GC1 stays silent on every db-n1-* Cloud SQL instance. Worth weighing rather than shrugging at: legacy estates are exactly where oversized connection pools tend to live, so the silence is concentrated where the finding would have been most useful.",
+      "what_would_close_it": "The Cloud SQL Admin API tiers.list response for the project, which returns RAM per tier. That is a code change and a credentialed runtime call, not a catalog edit, so it is out of scope for a documentation pass."
+    },
+
+    "not_encoded": {
+      "db-n1-standard-*": "The legacy N1 tiers carry no memory in their name, and Google's current Compute Engine documentation no longer publishes an N1 specification table: it names N1 only as the first-generation series. Searched again on 2026-08-14 and still not found. Rather than recall 3.75 GB per vCPU from memory, the rule stays silent on N1 tiers and says so.",
+      "db-n1-highmem-*": "Same as db-n1-standard-*: no published table found on 2026-08-14.",
+      "db-*-N4-*": "The N4 and C4A Enterprise Plus predefined families were not read against live documentation in this pass."
+    }
+  }
+}

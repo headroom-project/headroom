@@ -1,0 +1,29 @@
+{
+  "provider": "aws",
+  "domain": "lambda",
+  "updated_at": "2026-08-14",
+
+  "sqs_event_source": {
+    "default_batch_size": 10,
+    "min_reserved_concurrency": 5,
+    "recommended_visibility_multiple": 6,
+    "source": "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html#events-sqs-queueconfig",
+    "batch_size_source": "https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html#example-standard-queue-message-event",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "visibility_notes": "AWS requires the queue's visibility timeout to be at least the function timeout and validates it at create time, rejecting the event source mapping otherwise. It separately recommends at least six times the function timeout, so that a retry fits inside the window when the function is throttled mid-batch. If a batch window is configured, the recommendation becomes six times the function timeout plus MaximumBatchingWindowInSeconds.",
+    "concurrency_notes": "Lambda starts an SQS event source by processing five batches at once with five concurrent invocations, so AWS's guidance is that any function with reserved concurrency set should have at least five. Below that the reserved concurrency throttles the event source itself rather than the work. This is a floor, not a ceiling, and it only applies when reserved concurrency is set at all.",
+    "batch_size_notes": "Lambda polls up to 10 messages at a time by default. A standard queue can be configured up to 10,000 and a FIFO queue to 10, but any batch size above 10 also requires a batch window of at least 1 second.",
+    "verification": "All three encoded values CONFIRMED on 2026-08-14, none corrected, confidence raised medium -> high. Visibility multiple of 6: 'To allow your function time to process each batch of records, set the source queue's visibility timeout to at least six times the configuration timeout on your function. The extra time allows Lambda to retry if your function is throttled while processing a previous batch.' The 1x form is a hard API validation, not advice: 'Your function's timeout must be less than or equal to the queue's visibility timeout. Lambda validates this requirement when you create or update an event source mapping and returns an error if the function timeout exceeds the queue's visibility timeout.' Reserved concurrency of 5: 'If you configure reserved concurrency on your function, set a minimum of five concurrent executions to reduce the chance of throttling errors when Lambda invokes your function', with the mechanism given as 'Lambda starts processing five batches at a time with five concurrent invocations of your function.' Batch size of 10: 'By default, Lambda polls up to 10 messages in your queue at once and sends that batch to your function.' The batch-size default lives on with-sqs.html while the other two live on services-sqs-configure.html, hence the two source links.",
+    "scaling_notes_unencoded": "Recorded so it is not mistaken for a gap. On-demand SQS event sources scale by 'up to 300 concurrent invokes of your function a minute, up to a maximum of 1,250 concurrent invokes'. Provisioned mode changes both numbers (Lambda 'quickly adding up to 1,000 concurrent invokes per minute', and AWS advertises up to 100,000 concurrent invokes) and cannot be combined with the maximum concurrency setting. Any rule that reasons about how fast the consumer drains the queue, rather than how many connections it opens, needs these and must first determine which mode the plan declares."
+  },
+
+  "account": {
+    "default_concurrent_executions": 1000,
+    "source": "https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html#compute-and-storage",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "1,000 concurrent executions per account per region by default, increasable on request. Reserved concurrency is carved out of this pool, so reserving it for one function removes it from every other function in the same region. Treat 1,000 as an upper bound rather than a given: AWS now states that new accounts start with reduced concurrency quotas that it raises automatically with usage, so a fresh account has less than this.",
+    "verification": "CONFIRMED verbatim on 2026-08-14 from the 'Compute and storage' quota table: resource 'Concurrent executions', default quota '1,000', can be increased up to 'Tens of thousands'. New caveat found on the same page in this pass: 'New AWS accounts have reduced concurrency and memory quotas for Lambda Functions and Lambda MicroVMs. AWS raises these quotas automatically based on your usage.' Value unchanged."
+  }
+}

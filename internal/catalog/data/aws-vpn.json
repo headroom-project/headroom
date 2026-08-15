@@ -1,0 +1,37 @@
+{
+  "provider": "aws",
+  "domain": "vpn",
+  "updated_at": "2026-08-14",
+
+  "site_to_site": {
+    "max_gbps_per_tunnel": 1.25,
+    "tunnels_per_connection": 2,
+    "max_pps_per_tunnel": 140000,
+    "source": "https://docs.aws.amazon.com/vpn/latest/s2svpn/vpn-limits.html#vpn-quotas-bandwidth",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "AWS documents up to 1.25 Gbps and up to 140,000 packets per second per standard VPN tunnel. Both are ceilings, never floors: AWS lists packet size, traffic mix, shaping on intermediate networks and general internet conditions as things that reduce what you actually get. Each Site-to-Site VPN connection provides two tunnels, but because a virtual private gateway does not support ECMP, a VGW-terminated connection delivers one tunnel worth of throughput and not two.",
+    "verification": "CONFIRMED verbatim on 2026-08-14 from the 'Bandwidth and throughput' quota table: 'Maximum bandwidth per standard VPN tunnel | Up to 1.25 Gbps | No' (not adjustable) and 'Maximum packets per second (PPS) per standard VPN tunnel | Up to 140,000 | No'. Confidence raised medium -> high. One wording correction: this entry previously said only one tunnel 'carries traffic at a time' on a VGW. That overstates the source, which describes a connection's two tunnels as ones 'you can simultaneously use for high availability'. What stops them summing is the absence of ECMP, not tunnel state, and the note now says that instead."
+  },
+
+  "large_bandwidth_tunnel": {
+    "max_gbps_per_tunnel": 5,
+    "max_pps_per_tunnel": 400000,
+    "supported_on": ["transit_gateway", "cloud_wan"],
+    "source": "https://docs.aws.amazon.com/vpn/latest/s2svpn/vpn-limits.html#vpn-quotas-bandwidth",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "Recorded but deliberately NOT wired into any rule. AWS now documents a 'Large Bandwidth Tunnel' at 'Up to 5 Gbps' and 400,000 PPS, and a separate VPN Concentrator tunnel at 'Up to 100 Mbps'. Large bandwidth tunnels are 'Available for VPN connections attached to Transit Gateway or Cloud WAN', so they can never apply to the aws_vpn_gateway topology R8 fires on. If a rule is ever extended to transit gateway VPN attachments it must decide which of the three tunnel classes applies before quoting a number, and the plan may not say."
+  },
+
+  "ecmp": {
+    "virtual_private_gateway": false,
+    "transit_gateway": true,
+    "source": "https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/vpn.html",
+    "secondary_source": "https://docs.aws.amazon.com/vpn/latest/s2svpn/vpn-limits.html#vpn-quotas-bandwidth",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "Equal-cost multi-path over multiple VPN tunnels requires a transit gateway. A virtual private gateway does not do ECMP, so attaching more connections to a VGW adds redundancy and never adds bandwidth. This is the single most misread fact in AWS hybrid networking: the topology looks like it scales and does not. One condition on the escape route: ECMP on a transit gateway requires dynamic (BGP) routing, so a transit gateway wired with static routes aggregates no better than a VGW does.",
+    "verification": "Both halves confirmed on 2026-08-14, each from the page that states it plainly. Virtual private gateway, from the multi-VPC network infrastructure whitepaper, Option 3: 'VPN throughput to a VGW is limited to 1.25 Gbps per tunnel and ECMP load balancing is not supported.' Transit gateway, from the Site-to-Site VPN quotas page: 'For Site-to-Site VPN connections on a transit gateway, you can use ECMP to get higher VPN bandwidth by aggregating multiple VPN tunnels. To use ECMP, the VPN connection must be configured for dynamic routing. ECMP is not supported on VPN connections that use static routing.' The previous source link (s2svpn/vpn-tunnel-ecmp.html) did not resolve to a page carrying either statement and has been replaced by the two above."
+  }
+}

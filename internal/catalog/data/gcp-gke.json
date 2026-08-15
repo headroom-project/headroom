@@ -1,0 +1,46 @@
+{
+  "provider": "gcp",
+  "domain": "gke",
+  "updated_at": "2026-08-14",
+  "_discipline": "No entry ships without source + verified_at + confidence. A wrong number in a capacity report costs the whole customer, so an absent ceiling is always better than an uncertain one: rules must skip what they cannot ground.",
+
+  "pod_range": {
+    "default_max_pods_per_node": 110,
+    "max_pods_per_node_cap": 256,
+    "formula": "node netmask M = 31 - ceil(log2(max_pods_per_node)); nodes = 2^(M - pod_range_netmask)",
+    "source": "https://docs.cloud.google.com/kubernetes-engine/docs/how-to/flexible-pod-cidr",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "This is the ceiling nobody sees coming. GKE does not hand out pod addresses one at a time: it carves an aligned alias block out of the secondary range for each node, always at least twice the size of max_pods_per_node, so a /21 pod range at the default 110 pods per node holds eight nodes and not 2048 pods' worth of nodes. The blocks below were read from the live 'maximum Pods per node -> CIDR range per node' table, and the formula reproduces every row of it.",
+    "blocks": [
+      { "max_pods": 8, "netmask": 28, "addresses": 16 },
+      { "max_pods": 16, "netmask": 27, "addresses": 32 },
+      { "max_pods": 32, "netmask": 26, "addresses": 64 },
+      { "max_pods": 64, "netmask": 25, "addresses": 128 },
+      { "max_pods": 128, "netmask": 24, "addresses": 256 },
+      { "max_pods": 256, "netmask": 23, "addresses": 512 }
+    ],
+    "resize_notes": "The pod secondary range is fixed for the life of the cluster in the sense that matters: it cannot be shrunk or moved, and adding capacity means an additional pod range rather than a bigger one."
+  },
+
+  "node_range": {
+    "addresses_per_node": 1,
+    "reserved_addresses": 4,
+    "source": "https://docs.cloud.google.com/kubernetes-engine/docs/concepts/alias-ips",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "Each node takes one address from the subnet's primary range. Google Cloud reserves the first two and last two addresses of a primary range, which is why the documented default /20 primary range is quoted as supporting 4092 nodes rather than 4096. Anything else placed in the same subnet (VMs, internal load balancer forwarding rules, the proxy-only subnet is separate) competes for the same addresses, so the node count is a floor on demand, not a total."
+  },
+
+  "services_range": {
+    "addresses_per_service": 1,
+    "default_netmask": 20,
+    "default_max_services": 4096,
+    "smallest_netmask": 28,
+    "smallest_max_services": 16,
+    "source": "https://docs.cloud.google.com/kubernetes-engine/docs/concepts/alias-ips",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "Every ClusterIP Service consumes one address from the services secondary range. The published table gives /28 as the smallest range (16 Services) and /20 as the GKE-managed default (4096 Services). The range cannot be changed after the cluster is created, which is what makes an undersized one expensive: the fix is a new cluster."
+  }
+}

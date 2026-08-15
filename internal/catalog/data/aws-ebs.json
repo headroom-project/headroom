@@ -1,0 +1,38 @@
+{
+  "provider": "aws",
+  "domain": "ebs",
+  "updated_at": "2026-08-14",
+
+  "gp2": {
+    "baseline_iops_per_gib": 3,
+    "min_baseline_iops": 100,
+    "burst_iops": 3000,
+    "burst_irrelevant_at_gib": 1000,
+    "max_iops": 16000,
+    "min_size_for_max_iops_gib": 5334,
+    "credit_accrual_limit": 5400000,
+    "source": "https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html#gp2-performance",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "Baseline is 3 IOPS per GiB with a floor of 100 and a ceiling of 16,000, reached at 5,334 GiB. A volume smaller than 1000 GiB bursts to 3000 IOPS by spending a credit bucket that refills only at the baseline rate, so sustained load above baseline drains it and drops to baseline for as long as the load continues. The bucket holds 5.4 million credits, about 30 minutes at full burst, which is why a benchmark shorter than half an hour never sees the cliff. At 1000 GiB baseline equals the burst ceiling and credits stop mattering.",
+    "verification": "All five encoded numbers confirmed verbatim on 2026-08-14, none corrected. 'Baseline IOPS performance scales linearly between a minimum of 100 and a maximum of 16,000 at a rate of 3 IOPS per GiB of volume size.' Volumes 33.33 GiB and smaller get the 100 IOPS floor; 16,000 is reached at 5,334 GiB. 'gp2 volumes smaller than 1 TiB (and that are provisioned with less than 3,000 IOPS) can burst to 3,000 IOPS.' burst_irrelevant_at_gib = 1000 is confirmed by AWS's own example table, whose 1,000 GiB row shows baseline 3,000 and burst duration 'N/A*', footnoted 'The baseline performance of the volume exceeds the maximum burst performance.' Credit accrual limit: 'Volumes have an I/O credit accrual limit of 5.4 million I/O credits, which is enough to sustain the maximum burst performance of 3,000 IOPS for at least 30 minutes.' Confidence raised medium -> high."
+  },
+
+  "gp3": {
+    "included_iops": 3000,
+    "included_throughput_mibps": 125,
+    "max_iops": 80000,
+    "max_throughput_mibps": 2000,
+    "max_iops_per_gib": 500,
+    "max_mibps_per_iops": 0.25,
+    "min_size_for_max_iops_gib": 160,
+    "min_iops_for_max_throughput": 8000,
+    "outposts_max_iops": 16000,
+    "outposts_max_throughput_mibps": 1000,
+    "source": "https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html#gp3-performance",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "gp3 has no burst bucket: provisioned performance is sustained indefinitely. 3000 IOPS and 125 MiB/s are included in the price of storage; beyond that you provision up to 80,000 IOPS and 2,000 MiB/s. The 500 IOPS per GiB and 0.25 MiB/s per IOPS ratios are hard limits AWS rejects at create time, which makes them a plan-time correctness check rather than a capacity estimate. On AWS Outposts the ceilings are lower, 16,000 IOPS and 1,000 MiB/s.",
+    "verification": "CORRECTED 2026-08-14. max_iops was 16000, now 80000. max_throughput_mibps was 1000, now 2000. Source: 'You can provision additional IOPS (up to a maximum of 80,000) for an additional cost at a ratio of 500 IOPS per GiB of volume size. Maximum IOPS can be provisioned for volumes 160 GiB or larger (500 IOPS per GiB x 160 GiB = 80,000 IOPS).' And: 'You can provision additional throughput (up to a maximum of 2,000 MiB/s) for an additional cost at a ratio of 0.25 MiB/s per provisioned IOPS. Maximum throughput can be provisioned at 8,000 IOPS or higher and 16 GiB or larger.' The old pair is not invented: the same page still gives exactly 16,000 IOPS and 1,000 MiB/s for gp3 on Outposts, and those were the service-wide limits before AWS raised them. They are kept here under outposts_* so a future reader does not 'rediscover' them and revert this fix. Direction of the error: the old ceilings made R5 reject legal plans (a 20,000 IOPS gp3 volume is valid and was being reported as a create-time failure), a false positive rather than a missed ceiling. included_iops 3000, included_throughput_mibps 125, max_iops_per_gib 500 and max_mibps_per_iops 0.25 were all re-read and confirmed unchanged."
+  }
+}

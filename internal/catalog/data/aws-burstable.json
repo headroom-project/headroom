@@ -1,0 +1,52 @@
+{
+  "provider": "aws",
+  "domain": "ec2-burstable",
+  "updated_at": "2026-08-14",
+  "source": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-credits-baseline-concepts.html#burstable-performance-instances-credit-table",
+  "verified_at": "2026-08-14",
+  "confidence": "high",
+  "_notes": "Baseline is expressed per vCPU. Sustained utilization above baseline x vCPUs spends CPU credits; what happens when the bucket empties depends on the credit mode, which is the part almost nobody sets explicitly. Every row of the instances table below was read back against the source credit table on 2026-08-14 and all 21 entries matched: nothing was corrected, and confidence is raised from medium to high because the page prints these figures directly. The three columns are self-consistent by AWS's own published identity, '(number of credits earned/number of vCPUs)/60 minutes = % baseline utilization', which is a cheap arithmetic check on any future edit: t3.xlarge is (96/4)/60 = 40%.",
+
+  "default_credit_mode": {
+    "t2": "standard",
+    "t3": "unlimited",
+    "t3a": "unlimited",
+    "t4g": "unlimited",
+    "_source": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-credits-baseline-concepts.html#key-concepts",
+    "_verified_at": "2026-08-14",
+    "_confidence": "high",
+    "_notes": "CONFIRMED, not backwards. The source's summary table gives the 'Credit configuration modes' column as 'Standard, Unlimited (default)' for T4g, T3a and T3, and 'Standard (default), Unlimited' for T2. The page repeats it in prose: 'T4g, T3a, and T3 instances do not earn launch credits. These instances launch as unlimited by default.' So T3/T3a/T4g keep performance and bill for it, while T2 throttles instead.",
+    "_exception": "One documented exception the plan can see: 'T3 instances launched on a Dedicated Host launch as standard by default; unlimited mode is not supported for T3 instances on a Dedicated Host.' A plan that places a T3 on a Dedicated Host (aws_ec2_host / host_id / tenancy = host) inverts the advice for that instance, from 'you will be billed' to 'you will be throttled'. Not encoded as a rule input; recorded so the gap is known rather than assumed away."
+  },
+
+  "credit_mode_consequence": {
+    "unlimited": "Performance is sustained and surplus credits are billed per vCPU-hour. The ceiling is not the CPU, it is the invoice, and nothing in the plan bounds it.",
+    "standard": "Once the credit bucket empties the instance is throttled to its baseline and stays there while the load continues."
+  },
+
+  "instances": {
+    "t3.nano":    { "vcpus": 2, "baseline_pct_per_vcpu": 5,  "credits_per_hour": 6 },
+    "t3.micro":   { "vcpus": 2, "baseline_pct_per_vcpu": 10, "credits_per_hour": 12 },
+    "t3.small":   { "vcpus": 2, "baseline_pct_per_vcpu": 20, "credits_per_hour": 24 },
+    "t3.medium":  { "vcpus": 2, "baseline_pct_per_vcpu": 20, "credits_per_hour": 24 },
+    "t3.large":   { "vcpus": 2, "baseline_pct_per_vcpu": 30, "credits_per_hour": 36 },
+    "t3.xlarge":  { "vcpus": 4, "baseline_pct_per_vcpu": 40, "credits_per_hour": 96 },
+    "t3.2xlarge": { "vcpus": 8, "baseline_pct_per_vcpu": 40, "credits_per_hour": 192 },
+
+    "t3a.nano":    { "vcpus": 2, "baseline_pct_per_vcpu": 5,  "credits_per_hour": 6 },
+    "t3a.micro":   { "vcpus": 2, "baseline_pct_per_vcpu": 10, "credits_per_hour": 12 },
+    "t3a.small":   { "vcpus": 2, "baseline_pct_per_vcpu": 20, "credits_per_hour": 24 },
+    "t3a.medium":  { "vcpus": 2, "baseline_pct_per_vcpu": 20, "credits_per_hour": 24 },
+    "t3a.large":   { "vcpus": 2, "baseline_pct_per_vcpu": 30, "credits_per_hour": 36 },
+    "t3a.xlarge":  { "vcpus": 4, "baseline_pct_per_vcpu": 40, "credits_per_hour": 96 },
+    "t3a.2xlarge": { "vcpus": 8, "baseline_pct_per_vcpu": 40, "credits_per_hour": 192 },
+
+    "t4g.nano":    { "vcpus": 2, "baseline_pct_per_vcpu": 5,  "credits_per_hour": 6 },
+    "t4g.micro":   { "vcpus": 2, "baseline_pct_per_vcpu": 10, "credits_per_hour": 12 },
+    "t4g.small":   { "vcpus": 2, "baseline_pct_per_vcpu": 20, "credits_per_hour": 24 },
+    "t4g.medium":  { "vcpus": 2, "baseline_pct_per_vcpu": 20, "credits_per_hour": 24 },
+    "t4g.large":   { "vcpus": 2, "baseline_pct_per_vcpu": 30, "credits_per_hour": 36 },
+    "t4g.xlarge":  { "vcpus": 4, "baseline_pct_per_vcpu": 40, "credits_per_hour": 96 },
+    "t4g.2xlarge": { "vcpus": 8, "baseline_pct_per_vcpu": 40, "credits_per_hour": 192 }
+  }
+}

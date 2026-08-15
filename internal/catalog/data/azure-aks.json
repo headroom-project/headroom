@@ -1,0 +1,25 @@
+{
+  "provider": "azure",
+  "domain": "aks-networking",
+  "updated_at": "2026-08-14",
+
+  "source": "https://learn.microsoft.com/en-us/azure/aks/concepts-network-ip-address-planning",
+  "verified_at": "2026-08-14",
+  "confidence": "high",
+
+  "max_pods_hard_limit": 250,
+  "min_pods": 10,
+
+  "default_max_pods": {
+    "azure_node_subnet": 30,
+    "azure_pod_subnet": 110,
+    "azure_overlay": 250,
+    "kubenet": 110
+  },
+
+  "subnet_formula": "(nodes + max surge) + ((nodes + max surge) * max pods per node)",
+
+  "notes": "In a flat network model every pod takes a real address out of a virtual network subnet, so the demand is nodes x pods and not nodes. Azure CNI in node subnet mode (network_plugin = azure with no network_plugin_mode) takes both nodes and pods from the node subnet; Azure CNI pod subnet mode takes nodes from one subnet and pods from another. Azure CNI Overlay and kubenet give pods addresses from a separate CIDR that never touches the virtual network, so subnet exhaustion is not a question for them and the rule stays silent. Defaults differ by deployment path: the Azure CLI and ARM/portal have historically disagreed, and this table takes the values from the 'Maximum pods per node' table on the page above. A subnet CIDR cannot be resized once resources are deployed in it, and maxPods cannot be raised on an existing node pool: the only fix is a new node pool or a new cluster.",
+
+  "surge_notes": "The documented formula adds the upgrade surge nodes, because a rolling upgrade briefly runs an extra node and its full complement of pods. Terraform states max surge in upgrade_settings.max_surge as either a count or a percentage, and the rule ignores it when absent so that demand is understated rather than overstated."
+}

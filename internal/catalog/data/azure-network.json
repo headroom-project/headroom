@@ -1,0 +1,72 @@
+{
+  "provider": "azure",
+  "domain": "network",
+  "updated_at": "2026-08-14",
+
+  "subnet": {
+    "reserved_addresses": 5,
+    "smallest_prefix": 29,
+    "largest_prefix": 2,
+    "source": "https://learn.microsoft.com/en-us/azure/virtual-network/virtual-networks-faq",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "Azure reserves the first four addresses and the last address of every subnet: network, default gateway, and two used to map the Azure DNS addresses into the virtual network, plus the broadcast address. Same count as AWS, different reasons. The smallest usable IPv4 subnet is /29 and the largest is /2."
+  },
+
+  "nat_gateway": {
+    "snat_ports_per_public_ip": 64512,
+    "max_public_ips": 16,
+    "max_concurrent_connections": 2000000,
+    "concurrent_connections_per_ip_same_destination": 50000,
+    "default_tcp_idle_minutes": 4,
+    "max_tcp_idle_minutes": 120,
+    "source": "https://learn.microsoft.com/en-us/azure/nat-gateway/nat-gateway-resource#snat-ports",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "Each public IP attached to a NAT gateway contributes 64,512 SNAT ports, and a gateway takes at most 16 addresses, so the hard ceiling is a little over one million ports. Ports are allocated on demand rather than preallocated per instance, and when several subnets are attached to the same gateway they share one inventory. TCP and UDP have separate inventories. A closed connection holds its port for a 65 second (FIN) or 16 second (RST) cool-down before reuse, so the effective port count under connection churn is lower than the arithmetic suggests. Beyond 2 million active connections Microsoft states that data path availability declines and new connections fail.",
+    "verification": "All six encoded values re-read and confirmed on 2026-08-14, none corrected. 'Each public IP address for a NAT gateway provides 64,512 SNAT ports to make outbound connections. A NAT gateway can scale up to more than 1 million SNAT ports.' Addresses: 'A Standard NAT gateway supports up to 16 IPv4 public IP addresses' (StandardV2 supports 16 IPv4 and 16 IPv6). Connections: 'Standard and StandardV2 NAT gateways each support up to 50,000 concurrent connections per public IP address to the same destination endpoint' and 'Each can support up to 2 million active connections simultaneously ... If a NAT gateway exceeds 2 million connections, the data path's availability declines and new connections fail.' Idle timeout: 'Configurable; 4 minutes (default) to 120 minutes'. No per-instance preallocation: 'SNAT port inventory is available on demand to all instances within a subnet attached to the NAT gateway. No preallocation of SNAT ports per instance is required.' Caveat on the reuse timers: Microsoft footnotes them 'These timer settings are subject to change. The provided values can help with troubleshooting. You shouldn't take a dependency on specific timers at this time', so treat the cool-downs as directional. Not encoded, noted for completeness: the page now documents two SKUs, Standard (50 Gbps, 5M PPS, zonal) and StandardV2 (100 Gbps, 10M PPS, zone-redundant), and azurerm does not obviously distinguish them here."
+  },
+
+  "load_balancer_snat": {
+    "ports_per_frontend_ip": 64000,
+    "max_default_ports_per_instance": 1024,
+    "min_default_ports_per_instance": 32,
+    "default_allocation": [
+      {"pool_max": 50,   "ports": 1024},
+      {"pool_max": 100,  "ports": 512},
+      {"pool_max": 200,  "ports": 256},
+      {"pool_max": 400,  "ports": 128},
+      {"pool_max": 800,  "ports": 64},
+      {"pool_max": 1000, "ports": 32}
+    ],
+    "source": "https://learn.microsoft.com/en-us/azure/load-balancer/load-balancer-outbound-connections#default-port-allocation-table",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "borrowed_from": "Azure Load Balancer",
+    "applies_to": "Azure NAT Gateway (by analogy only)",
+    "notes": "WARNING, READ BEFORE CITING: THIS TABLE IS AZURE LOAD BALANCER'S, NOT AZURE NAT GATEWAY'S. It is a stand-in, and any finding that uses the 1024 or 32 thresholds against a NAT gateway must say out loud that the per-instance figure comes from a different Azure service. Searched again on 2026-08-14 for a NAT Gateway equivalent and there is none, for a structural reason rather than a documentation gap: NAT Gateway does not preallocate at all. Its own page says 'SNAT port inventory is available on demand to all instances within a subnet attached to the NAT gateway. No preallocation of SNAT ports per instance is required', so there is no per-instance number for Microsoft to publish. The stand-in is kept because the underlying question, inventory divided by instances, is the same one, and because Microsoft's Load Balancer table is its own published statement of how many SNAT ports one instance plausibly needs: 1,024 for a pool of 50 down to a floor of 32 for a pool of a thousand. Note the direction this borrowing errs in: NAT Gateway's dynamic sharing is strictly better than Load Balancer's static preallocation, so a NAT gateway that fails this yardstick is genuinely tight, while one that passes is not thereby proven safe. Table re-read and all six rows confirmed on 2026-08-14 (1-50 -> 1,024; 51-100 -> 512; 101-200 -> 256; 201-400 -> 128; 401-800 -> 64; 801-1,000 -> 32), as is the 64,000 ports per frontend IP ('When you add a public IP address as a frontend IP to a load balancer, 64,000 ports are eligible for SNAT'). Microsoft explicitly advises against relying on the default allocation for production: 'Don't use default port allocation for production workloads, as it allocates a minimal number of ports to each backend instance and increases the risk of SNAT port exhaustion.' Note also that Load Balancer's 64,000 per frontend IP is a different number from NAT Gateway's 64,512 per public IP; do not unify them."
+  },
+
+  "vpn_gateway": {
+    "source": "https://learn.microsoft.com/en-us/azure/vpn-gateway/about-gateway-skus#gateway-skus-by-tunnel-connection-and-throughput",
+    "verified_at": "2026-08-14",
+    "confidence": "high",
+    "notes": "Aggregate throughput is a benchmark, not an SLA, and it is shared by every tunnel on the gateway, so adding connections adds sites and never bandwidth. Microsoft measured it by maximizing a combination of site-to-site and point-to-site connections and states that a single connection can be much lower, and that no benchmark is guaranteed. The quoted figure assumes Generation2: VpnGw2, VpnGw3, VpnGw2AZ and VpnGw3AZ also exist as Generation1 SKUs at lower throughput, and on a Generation1 gateway the real ceiling is up to half of what is quoted here. VpnGw1 to VpnGw5 without the AZ suffix are slated for migration and should not be used for new gateways. Above 100 site-to-site tunnels Microsoft directs you to Virtual WAN rather than a larger SKU.",
+    "verification": "Every SKU row was re-read against the 'Gateway SKUs by tunnel, connection, and throughput' tables on 2026-08-14. All eleven matched at Generation2, or at Generation1 where that is the only generation the SKU has, and no encoded value was corrected. What changed is the generation caveat, which was previously both incomplete and backwards: see sku_notes. The source link was retargeted because the old one (vpn-gateway-about-vpngateways) no longer carries the SKU tables; the related settings page now says only 'See About Gateway SKUs article for the latest information about gateway SKUs, performance, and supported features.' Benchmark caveats quoted verbatim: 'The Aggregate Throughput Benchmarks were tested by maximizing a combination of S2S and P2S connections. A single P2S or S2S connection can have a much lower throughput' and 'All benchmarks aren't guaranteed due to Internet traffic conditions and your application behaviors.'",
+    "skus": {
+      "Basic":     {"generation": "Generation1 only", "tunnels": 10,  "p2s_ikev2": 0,     "p2s_sstp": 128, "throughput_mbps": 100,   "throughput_mbps_gen1": 100,   "throughput_mbps_gen2": 0,     "bgp": false, "zone_redundant": false, "vms_supported": 200},
+      "VpnGw1":    {"generation": "Generation1 only", "tunnels": 30,  "p2s_ikev2": 250,   "p2s_sstp": 128, "throughput_mbps": 650,   "throughput_mbps_gen1": 650,   "throughput_mbps_gen2": 0,     "bgp": true,  "zone_redundant": false, "vms_supported": 450},
+      "VpnGw2":    {"generation": "Generation1 and Generation2", "tunnels": 30,  "p2s_ikev2": 500,   "p2s_sstp": 128, "throughput_mbps": 1250,  "throughput_mbps_gen1": 1000,  "throughput_mbps_gen2": 1250,  "vms_supported_gen1": 1300, "vms_supported_gen2": 685,  "bgp": true,  "zone_redundant": false, "vms_supported": 685},
+      "VpnGw3":    {"generation": "Generation1 and Generation2", "tunnels": 30,  "p2s_ikev2": 1000,  "p2s_sstp": 128, "throughput_mbps": 2500,  "throughput_mbps_gen1": 1250,  "throughput_mbps_gen2": 2500,  "vms_supported_gen1": 4000, "vms_supported_gen2": 2240, "bgp": true,  "zone_redundant": false, "vms_supported": 2240},
+      "VpnGw4":    {"generation": "Generation2 only", "tunnels": 100, "p2s_ikev2": 5000,  "p2s_sstp": 128, "throughput_mbps": 5000,  "throughput_mbps_gen1": 0,     "throughput_mbps_gen2": 5000,  "bgp": true,  "zone_redundant": false, "vms_supported": 5300},
+      "VpnGw5":    {"generation": "Generation2 only", "tunnels": 100, "p2s_ikev2": 10000, "p2s_sstp": 128, "throughput_mbps": 10000, "throughput_mbps_gen1": 0,     "throughput_mbps_gen2": 10000, "bgp": true,  "zone_redundant": false, "vms_supported": 6700},
+      "VpnGw1AZ":  {"generation": "Generation1 only", "tunnels": 30,  "p2s_ikev2": 250,   "p2s_sstp": 128, "throughput_mbps": 650,   "throughput_mbps_gen1": 650,   "throughput_mbps_gen2": 0,     "bgp": true,  "zone_redundant": true,  "vms_supported": 1000},
+      "VpnGw2AZ":  {"generation": "Generation1 and Generation2", "tunnels": 30,  "p2s_ikev2": 500,   "p2s_sstp": 128, "throughput_mbps": 1250,  "throughput_mbps_gen1": 1000,  "throughput_mbps_gen2": 1250,  "vms_supported_gen1": 2000, "vms_supported_gen2": 2000, "bgp": true,  "zone_redundant": true,  "vms_supported": 2000},
+      "VpnGw3AZ":  {"generation": "Generation1 and Generation2", "tunnels": 30,  "p2s_ikev2": 1000,  "p2s_sstp": 128, "throughput_mbps": 2500,  "throughput_mbps_gen1": 1250,  "throughput_mbps_gen2": 2500,  "vms_supported_gen1": 5000, "vms_supported_gen2": 3300, "bgp": true,  "zone_redundant": true,  "vms_supported": 3300},
+      "VpnGw4AZ":  {"generation": "Generation2 only", "tunnels": 100, "p2s_ikev2": 5000,  "p2s_sstp": 128, "throughput_mbps": 5000,  "throughput_mbps_gen1": 0,     "throughput_mbps_gen2": 5000,  "bgp": true,  "zone_redundant": true,  "vms_supported": 4400},
+      "VpnGw5AZ":  {"generation": "Generation2 only", "tunnels": 100, "p2s_ikev2": 10000, "p2s_sstp": 128, "throughput_mbps": 10000, "throughput_mbps_gen1": 0,     "throughput_mbps_gen2": 10000, "bgp": true,  "zone_redundant": true,  "vms_supported": 9000}
+    },
+    "sku_notes": "READ THIS BEFORE QUOTING throughput_mbps. Four SKUs exist in both generations with different throughput, confirmed on 2026-08-14: VpnGw2 (Gen1 1 Gbps / Gen2 1.25 Gbps), VpnGw3 (Gen1 1.25 Gbps / Gen2 2.5 Gbps), VpnGw2AZ (Gen1 1 Gbps / Gen2 1.25 Gbps), VpnGw3AZ (Gen1 1.25 Gbps / Gen2 2.5 Gbps). The previous audit thought this affected only the AZ pair; it affects the non-AZ pair identically. Both generations are now carried in throughput_mbps_gen1 and throughput_mbps_gen2, and throughput_mbps is the Generation2 value. THE QUOTED CEILING ASSUMES GENERATION2. Say that in the finding. Do not repeat the claim this file used to make, that taking the higher of the two 'makes the finding conservative': it does the opposite. Quoting 2.5 Gbps for a gateway that is really a Generation1 VpnGw3AZ at 1.25 Gbps overstates the headroom by 2x and understates the risk, which is the one direction a capacity report must never err in. Also correct the premise: Terraform DOES state the generation. azurerm_virtual_network_gateway has a 'generation' argument, documented as 'The Generation of the Virtual Network gateway. Possible values include Generation1, Generation2 or None', and headroom's own extract allowlist already captures it. AZ4 simply does not read it yet. Until it does, the Generation2 assumption stands and must be declared. VpnGw1AZ, VpnGw1 and Basic are Generation1 only; VpnGw4, VpnGw5, VpnGw4AZ and VpnGw5AZ are Generation2 only; for those the two fields agree with throughput_mbps and a zero means the SKU does not exist in that generation. Basic supports no IKEv2/OpenVPN point-to-site connections at all. vms_supported also differs by generation on the dual SKUs and is carried the same way.",
+    "per_tunnel_notes": "Separate from the aggregate benchmark, Microsoft publishes a per-tunnel performance table measured with 100 connections, and it is markedly lower than the aggregate for the large SKUs: Generation2 VpnGw4 and VpnGw5 both observe 2.3 Gbps per tunnel with GCMAES256, against aggregate benchmarks of 5 and 10 Gbps. It also drops hard with weaker crypto, to 700 Mbps with AES256/SHA256 and 140 Mbps with DES3/SHA256. Not encoded, because the plan does not reveal the negotiated algorithm and a single tunnel is not the ceiling the rule reasons about. Recorded so that nobody 'corrects' the aggregate figures to the per-tunnel ones."
+  }
+}

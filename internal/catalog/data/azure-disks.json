@@ -1,0 +1,48 @@
+{
+  "provider": "azure",
+  "domain": "managed-disks",
+  "updated_at": "2026-08-14",
+
+  "source": "https://learn.microsoft.com/en-us/azure/virtual-machines/disks-types",
+  "verified_at": "2026-08-14",
+  "confidence": "high",
+  "notes": "Premium SSD and Standard SSD are sold in fixed size tiers, and a disk provisioned at any size in between is billed and served as the next tier up: 200 GiB of Standard SSD is an E15. Performance is therefore a step function of size, which is what makes it possible to state a disk's ceiling from the terraform alone. Premium SSD v2 and Ultra Disk are excluded from this table on purpose: their IOPS and throughput are set independently of size on the resource itself, so the plan already states them and no catalog is needed.",
+
+  "burst_notes": "Premium SSD tiers up to and including P20 (512 GiB) burst to 3,500 IOPS and 170 MB/s on a credit bucket for up to 30 minutes, which is exactly the gp2 trap in a different accent: a benchmark runs on credits and production does not. P30 and larger support on-demand bursting, which is billed rather than banked and has no duration limit.",
+
+  "premium_ssd": [
+    {"tier": "P1",  "size_gib": 4,     "iops": 120,   "mbps": 25,  "burst_iops": 3500,  "burst_mbps": 170},
+    {"tier": "P2",  "size_gib": 8,     "iops": 120,   "mbps": 25,  "burst_iops": 3500,  "burst_mbps": 170},
+    {"tier": "P3",  "size_gib": 16,    "iops": 120,   "mbps": 25,  "burst_iops": 3500,  "burst_mbps": 170},
+    {"tier": "P4",  "size_gib": 32,    "iops": 120,   "mbps": 25,  "burst_iops": 3500,  "burst_mbps": 170},
+    {"tier": "P6",  "size_gib": 64,    "iops": 240,   "mbps": 50,  "burst_iops": 3500,  "burst_mbps": 170},
+    {"tier": "P10", "size_gib": 128,   "iops": 500,   "mbps": 100, "burst_iops": 3500,  "burst_mbps": 170},
+    {"tier": "P15", "size_gib": 256,   "iops": 1100,  "mbps": 125, "burst_iops": 3500,  "burst_mbps": 170},
+    {"tier": "P20", "size_gib": 512,   "iops": 2300,  "mbps": 150, "burst_iops": 3500,  "burst_mbps": 170},
+    {"tier": "P30", "size_gib": 1024,  "iops": 5000,  "mbps": 200, "burst_iops": 30000, "burst_mbps": 1000},
+    {"tier": "P40", "size_gib": 2048,  "iops": 7500,  "mbps": 250, "burst_iops": 30000, "burst_mbps": 1000},
+    {"tier": "P50", "size_gib": 4096,  "iops": 7500,  "mbps": 250, "burst_iops": 30000, "burst_mbps": 1000},
+    {"tier": "P60", "size_gib": 8192,  "iops": 16000, "mbps": 500, "burst_iops": 30000, "burst_mbps": 1000},
+    {"tier": "P70", "size_gib": 16384, "iops": 18000, "mbps": 750, "burst_iops": 30000, "burst_mbps": 1000},
+    {"tier": "P80", "size_gib": 32767, "iops": 20000, "mbps": 900, "burst_iops": 30000, "burst_mbps": 1000}
+  ],
+
+  "standard_ssd": [
+    {"tier": "E1",  "size_gib": 4,     "iops": 500,  "mbps": 100, "burst_iops": 600,  "burst_mbps": 150},
+    {"tier": "E2",  "size_gib": 8,     "iops": 500,  "mbps": 100, "burst_iops": 600,  "burst_mbps": 150},
+    {"tier": "E3",  "size_gib": 16,    "iops": 500,  "mbps": 100, "burst_iops": 600,  "burst_mbps": 150},
+    {"tier": "E4",  "size_gib": 32,    "iops": 500,  "mbps": 100, "burst_iops": 600,  "burst_mbps": 150},
+    {"tier": "E6",  "size_gib": 64,    "iops": 500,  "mbps": 100, "burst_iops": 600,  "burst_mbps": 150},
+    {"tier": "E10", "size_gib": 128,   "iops": 500,  "mbps": 100, "burst_iops": 600,  "burst_mbps": 150},
+    {"tier": "E15", "size_gib": 256,   "iops": 500,  "mbps": 100, "burst_iops": 600,  "burst_mbps": 150},
+    {"tier": "E20", "size_gib": 512,   "iops": 500,  "mbps": 100, "burst_iops": 600,  "burst_mbps": 150},
+    {"tier": "E30", "size_gib": 1024,  "iops": 500,  "mbps": 100, "burst_iops": 1000, "burst_mbps": 250},
+    {"tier": "E40", "size_gib": 2048,  "iops": 500,  "mbps": 100, "burst_iops": 0,    "burst_mbps": 0},
+    {"tier": "E50", "size_gib": 4096,  "iops": 500,  "mbps": 100, "burst_iops": 0,    "burst_mbps": 0},
+    {"tier": "E60", "size_gib": 8192,  "iops": 2000, "mbps": 400, "burst_iops": 0,    "burst_mbps": 0},
+    {"tier": "E70", "size_gib": 16384, "iops": 4000, "mbps": 600, "burst_iops": 0,    "burst_mbps": 0},
+    {"tier": "E80", "size_gib": 32767, "iops": 6000, "mbps": 750, "burst_iops": 0,    "burst_mbps": 0}
+  ],
+
+  "standard_ssd_notes": "Standard SSD figures are documented as 'up to', not as provisioned guarantees: Microsoft designs them to deliver the stated numbers 99% of the time rather than 99.9%. A rule must not present them as a floor. Every tier from E1 to E50 shares the same 500 IOPS and 100 MB/s, which is the point worth making: buying a bigger Standard SSD buys capacity and nothing else until E60."
+}

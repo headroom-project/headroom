@@ -1,0 +1,141 @@
+{
+  "provider": "aws",
+  "domain": "rds",
+  "updated_at": "2026-08-14",
+  "_discipline": "No entry ships without source + verified_at + confidence. A wrong number in a capacity report costs the whole customer, so an absent ceiling is always better than an uncertain one: rules must skip what they cannot ground.",
+
+  "_dbinstanceclassmemory": {
+    "question": "Is DBInstanceClassMemory the full instance class memory, or memory minus what AWS reserves?",
+    "answer": "Minus what AWS reserves. Settled against the source on 2026-08-14.",
+    "quote": "DBInstanceClassMemory is in bytes. ... Because of memory reserved for the operating system and RDS management processes, this memory size is smaller than the value in gibibytes (GiB) shown in Hardware specifications for DB instance classes.",
+    "consequence": "The catalog feeds these formulas the FULL class memory from the instance_classes table, because AWS does not publish the reserved amount for any class. Every number the rules derive is therefore an UPPER BOUND on the real default max_connections, and rules must say so rather than present it as the exact ceiling. Erring high understates risk, which is the wrong direction for a capacity report, so a finding that lands close to the reported ceiling should be read as already over it.",
+    "published_data_points": "AWS publishes two worked examples of the size of the gap, both for MySQL: on a class with 8 GiB (db.m7g.large) the naive arithmetic gives 8589934592/12582880 = 683 while the real value is 'approximately 630' (about 8 percent reserved); on db.t3.micro the real value is 'approximately 60' against a naive 85 (about 30 percent reserved). The reserve is proportionally far larger on small classes, so the upper bound is loosest exactly where the burstable classes people actually deploy live.",
+    "source": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Limits.html#RDS_Limits.MaxConnections",
+    "verified_at": "2026-08-14",
+    "confidence": "high"
+  },
+
+  "max_connections": {
+    "postgres": {
+      "formula": "LEAST({DBInstanceClassMemory/9531392}, 5000)",
+      "divisor": 9531392,
+      "cap": 5000,
+      "allowed_values": "6-262143",
+      "source": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Limits.html#RDS_Limits.MaxConnections",
+      "verified_at": "2026-08-14",
+      "confidence": "high",
+      "notes": "Default value of max_connections in the default parameter group, capped at 5000. DBInstanceClassMemory is already net of the memory AWS reserves for the OS and its management processes, and AWS does not publish that reserve per class, so this catalog feeds the formula full class memory and the resulting figure is an UPPER BOUND: the real default sits a few percent lower on large classes and tens of percent lower on small ones. Read a workload that lands near this ceiling as already over it. Assumes the customer did not override the parameter; when a custom parameter group is attached the rule must lower its confidence.",
+      "verification": "Quoted verbatim from the 'Maximum number of database connections' table on 2026-08-14: engine PostgreSQL, parameter max_connections, allowed values 6-262143, default 'LEAST({DBInstanceClassMemory/9531392}, 5000)'. Divisor 9531392 and the 5000 cap both confirmed unchanged. Confidence raised medium -> high; the medium grade existed because the DBInstanceClassMemory question was open, and it is now settled (see _dbinstanceclassmemory)."
+    },
+    "mysql": {
+      "formula": "{DBInstanceClassMemory/12582880}",
+      "divisor": 12582880,
+      "cap": 0,
+      "allowed_values": "1-100000",
+      "source": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Limits.html#RDS_Limits.MaxConnections",
+      "verified_at": "2026-08-14",
+      "confidence": "high",
+      "notes": "Default value of max_connections, effectively memory in MB divided by 12, with no cap. Same upper-bound caveat as postgres and it bites harder here: AWS states that on db.t3.micro the real default is approximately 60 where the full-memory arithmetic gives 85, because RDS reserves a large share of a small instance's memory. Treat the number as a ceiling that the instance will not actually reach.",
+      "verification": "Quoted verbatim on 2026-08-14: engine MySQL, allowed values 1-100000, default '{DBInstanceClassMemory/12582880}', described by AWS as 'The formula is effectively equivalent to MB/12'. No LEAST() wrapper on this engine, so cap stays 0. Divisor confirmed unchanged. Confidence raised medium -> high."
+    },
+    "mariadb": {
+      "formula": "LEAST({DBInstanceClassMemory/25165760},12000)",
+      "divisor": 25165760,
+      "cap": 12000,
+      "allowed_values": "1-100000",
+      "source": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Limits.html#RDS_Limits.MaxConnections",
+      "verified_at": "2026-08-14",
+      "confidence": "high",
+      "notes": "MariaDB does NOT share the MySQL formula, contrary to what this catalog said before 2026-08-14. From MariaDB 10.5 onward the default is memory in MB divided by 25, capped at 12,000 connections, which is half the MySQL figure for the same instance class. The encoded value is for 10.5 and higher, the only versions RDS offers; the divisor for the legacy 10.4 is double this one, and the engine attribute in a plan does not carry the version, so a plan pinned to 10.4 would be under-reported by 2x. Same upper-bound caveat as the other engines.",
+      "verification": "CORRECTED 2026-08-14. Divisor was 12582880 with no cap; now 25165760 with a cap of 12000. Source states: 'For MariaDB 10.5 and higher versions, the default is: LEAST({DBInstanceClassMemory/25165760},12000). The formula is effectively equivalent to MB/25. If the default value calculation results in a value greater than 12,000, Amazon RDS sets the limit to 12,000.' The old divisor is the MariaDB 10.4 one: 'For MariaDB version 10.4: {DBInstanceClassMemory/12582880}. The formula is effectively equivalent to MB/12.' Impact: every MariaDB ceiling this catalog reports is halved. A db.r5.large (16 GiB) was reported at 1365 and is now 682; a db.t3.medium (4 GiB) was 341 and is now 170. This is the only correction in this pass that LOWERS a ceiling, i.e. the only one where the old catalog was telling customers they had headroom they did not have. No test or fixture exercises the mariadb engine, so nothing in the suite moved."
+    }
+  },
+
+  "unsupported_engines": {
+    "aurora-postgresql": "Aurora derives max_connections from a different, logarithmic formula. Not encoded yet: reporting the RDS number here would be wrong.",
+    "aurora-mysql": "Aurora derives max_connections from a different, logarithmic formula. Not encoded yet.",
+    "sqlserver-ex": "SQL Server defaults to a practically unbounded connection limit; the real ceiling is memory and worker threads, which needs its own rule.",
+    "sqlserver-se": "Same as sqlserver-ex.",
+    "sqlserver-web": "Same as sqlserver-ex.",
+    "oracle-se2": "Oracle governs sessions through the PROCESSES parameter, which is not derivable from the instance class alone.",
+    "oracle-ee": "Same as oracle-se2."
+  },
+
+  "instance_classes": {
+    "_source": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.DBInstanceClass.Summary.html",
+    "_verified_at": "2026-08-14",
+    "_confidence": "high",
+    "_unit": "gibibytes of instance class memory",
+    "_verification_note": "Every class in this table was read back against the 'Memory (GiB)' column of the hardware specification tables on 2026-08-14 and all 60 entries matched; nothing was corrected. The source link was retargeted from Concepts.DBInstanceClass.html (the chapter landing page) to Concepts.DBInstanceClass.Summary.html, which is the page that actually prints the numbers. Spot checks demanded by the audit: db.t3.medium = 4, db.m5.large = 8, db.r5.large = 16, db.r6g.xlarge = 32, all confirmed. Watch the memory-optimized tables when re-verifying: db.r5 and db.r6i place a 'Normalized units' column immediately after 'Memory (GiB)' (db.r5.large reads 2 | 10 | 16 | 4), and reading one column too far yields 4 GiB for a 16 GiB class.",
+    "_unit_note": "These are the GiB figures AWS prints for the hardware, NOT DBInstanceClassMemory. See _dbinstanceclassmemory above: the parameter-group variable is smaller than this by the OS and RDS management reserve, which AWS does not publish per class.",
+
+    "db.t3.micro": 1,
+    "db.t3.small": 2,
+    "db.t3.medium": 4,
+    "db.t3.large": 8,
+    "db.t3.xlarge": 16,
+    "db.t3.2xlarge": 32,
+
+    "db.t4g.micro": 1,
+    "db.t4g.small": 2,
+    "db.t4g.medium": 4,
+    "db.t4g.large": 8,
+    "db.t4g.xlarge": 16,
+    "db.t4g.2xlarge": 32,
+
+    "db.m5.large": 8,
+    "db.m5.xlarge": 16,
+    "db.m5.2xlarge": 32,
+    "db.m5.4xlarge": 64,
+    "db.m5.8xlarge": 128,
+    "db.m5.12xlarge": 192,
+    "db.m5.16xlarge": 256,
+    "db.m5.24xlarge": 384,
+
+    "db.m6g.large": 8,
+    "db.m6g.xlarge": 16,
+    "db.m6g.2xlarge": 32,
+    "db.m6g.4xlarge": 64,
+    "db.m6g.8xlarge": 128,
+    "db.m6g.12xlarge": 192,
+    "db.m6g.16xlarge": 256,
+
+    "db.m6i.large": 8,
+    "db.m6i.xlarge": 16,
+    "db.m6i.2xlarge": 32,
+    "db.m6i.4xlarge": 64,
+    "db.m6i.8xlarge": 128,
+
+    "db.m7g.large": 8,
+    "db.m7g.xlarge": 16,
+    "db.m7g.2xlarge": 32,
+    "db.m7g.4xlarge": 64,
+
+    "db.r5.large": 16,
+    "db.r5.xlarge": 32,
+    "db.r5.2xlarge": 64,
+    "db.r5.4xlarge": 128,
+    "db.r5.8xlarge": 256,
+    "db.r5.12xlarge": 384,
+    "db.r5.16xlarge": 512,
+    "db.r5.24xlarge": 768,
+
+    "db.r6g.large": 16,
+    "db.r6g.xlarge": 32,
+    "db.r6g.2xlarge": 64,
+    "db.r6g.4xlarge": 128,
+    "db.r6g.8xlarge": 256,
+    "db.r6g.12xlarge": 384,
+    "db.r6g.16xlarge": 512,
+
+    "db.r6i.large": 16,
+    "db.r6i.xlarge": 32,
+    "db.r6i.2xlarge": 64,
+    "db.r6i.4xlarge": 128,
+
+    "db.r7g.large": 16,
+    "db.r7g.xlarge": 32,
+    "db.r7g.2xlarge": 64,
+    "db.r7g.4xlarge": 128
+  }
+}

@@ -1,0 +1,124 @@
+# headroom.yaml
+#
+# Drop this at the root of a repository and headroom finds it on its own. Three
+# layers, in increasing order of how much rope they hand you:
+#
+#   defaults / rules   tune the built-in capacity rules
+#   catalog            state facts about this account that no plan can state
+#   exceptions         silence a finding, with a reason and an end date
+#   custom             assertions this organization enforces
+#
+# The built-in capacity rules are not authorable here on purpose. Their value is
+# the curated ceiling behind them, and a ceiling nobody verified is worse than no
+# ceiling at all.
+
+version: 1
+
+# --------------------------------------------------------------------- tuning
+
+defaults:
+  # Connections per task to assume when the task definition does not declare
+  # one. Raise it if your services default to a bigger pool than the ten most
+  # ORMs ship with.
+  pool_size: 10
+  # Fraction of a ceiling that counts as thin headroom.
+  warn_at: 0.8
+  # How far a front tier may grow relative to a fixed backend before R6 says so.
+  scale_ratio_warn: 4
+
+rules:
+  R4:
+    # One NAT gateway is a deliberate cost decision here and the team has had
+    # the conversation. Turning the rule off is cheaper than reading it weekly.
+    enabled: false
+  R5:
+    # gp2 is banned by standard, so its burst cliff is not a warning here.
+    severity: critical
+
+# ------------------------------------------------------------------- catalog
+#
+# Everything in this block is a fact a human knows and the plan does not. Each
+# entry moves a finding from medium confidence to high without granting anybody
+# read access to the account.
+
+catalog:
+  # A custom parameter group raised this instance well above the class default.
+  # Without this line headroom lowers its confidence and says it cannot tell.
+  rds_max_connections:
+    aws_db_instance.reporting: 2000
+
+  # A class released after this build. Teaching it here unblocks the rule now
+  # instead of waiting for a release.
+  instance_class_memory_gib:
+    db.r7i.8xlarge: 256
+
+# ----------------------------------------------------------------- exceptions
+#
+# A reason and an expiry are both required. A suppression with no end date
+# outlives the reason for it, and on the day it expires the finding comes back
+# carrying the reason that was given, so the debt surfaces instead of rotting.
+
+exceptions:
+  - rule: R6
+    resource: aws_db_instance.legacy
+    reason: "Migration to Aurora scheduled for Q4, INFRA-812"
+    expires: 2026-12-31
+
+  # A trailing * matches a prefix, so a whole module can be excepted at once.
+  - rule: R7
+    resource: module.sandbox.*
+    reason: "Sandbox account, burstable is the point"
+    expires: 2027-01-31
+
+# --------------------------------------------------------------------- custom
+#
+# Assertions, not capacity maths. Operators available: equals, not_equals, in,
+# not_in, exists, matches, not_matches, gt, gte, lt, lte, and
+# cidr_prefix_gt / gte / lt / lte.
+# Attribute paths may address one nested block, as in root_block_device.volume_type.
+
+custom:
+  - id: ORG-001
+    title: gp2 volumes are not allowed
+    severity: critical
+    match:
+      type: aws_ebs_volume
+      where:
+        - attr: type
+          equals: gp2
+    summary: "{{address}} uses gp2. The standard here is gp3."
+    detail:
+      - "gp3 delivers 3000 IOPS and 125 MiB/s with no credit bucket, at a lower price per GiB."
+    source: https://wiki.internal/standards/storage
+
+  - id: ORG-002
+    title: Subnets must be a /24 or larger
+    severity: warning
+    match:
+      type: aws_subnet
+      where:
+        - attr: cidr_block
+          cidr_prefix_gt: 24
+    summary: "{{address}} is {{attr:cidr_block}}, smaller than the /24 minimum."
+    detail:
+      - "A subnet CIDR cannot be resized after creation, so this is a one-way decision."
+
+  - id: ORG-003
+    title: Databases must declare storage autoscaling
+    severity: warning
+    match:
+      type: aws_db_instance
+      where:
+        - attr: max_allocated_storage
+          exists: false
+    summary: "{{address}} has no max_allocated_storage, so RDS storage autoscaling is off."
+
+  - id: ORG-004
+    title: Only approved instance families
+    severity: warning
+    match:
+      type: aws_instance
+      where:
+        - attr: instance_type
+          not_matches: "^(t3|m6i|c6i|r6i)\\."
+    summary: "{{address}} runs {{attr:instance_type}}, outside the approved families."

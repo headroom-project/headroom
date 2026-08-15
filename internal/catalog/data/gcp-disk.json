@@ -1,0 +1,41 @@
+{
+  "provider": "gcp",
+  "domain": "persistent-disk",
+  "updated_at": "2026-08-14",
+  "_discipline": "No entry ships without source + verified_at + confidence. A wrong number in a capacity report costs the whole customer, so an absent ceiling is always better than an uncertain one: rules must skip what they cannot ground.",
+
+  "types": {
+    "pd-standard": {
+      "read_iops_per_gib": 0.75,
+      "write_iops_per_gib": 1.5,
+      "throughput_mibps_per_gib": 0.12,
+      "source": "https://docs.cloud.google.com/compute/docs/disks/performance",
+      "verified_at": "2026-08-14",
+      "confidence": "high",
+      "notes": "Read from the live per-GiB rate table. There is no burst bucket and no baseline floor: a pd-standard disk delivers exactly size x rate, which is why a 20 GiB pd-standard boot disk sustains 15 read IOPS and nothing in the plan says so."
+    },
+    "pd-balanced": {
+      "read_iops_per_gib": 6,
+      "write_iops_per_gib": 6,
+      "throughput_mibps_per_gib": 0.28,
+      "source": "https://docs.cloud.google.com/compute/docs/disks/performance",
+      "verified_at": "2026-08-14",
+      "confidence": "high",
+      "notes": "Read from the live per-GiB rate table."
+    }
+  },
+
+  "vcpu_cap": {
+    "encoded": false,
+    "skip_reason": "RE-CHECKED 2026-08-14: no usable single table exists, so this stays unencoded. The page states 'The machine type and the number of vCPUs on the instance determine the per-instance limits', and then gives separate performance tables per machine family (C2, C2D, A2, A3 and so on), some keyed by exact machine type and some by vCPU count within that family. There is therefore no vCPU-to-IOPS function that is correct across families, and encoding one would be inventing precision. The per-GiB rates above were re-read in the same pass and both types matched. The consequence is directional and safe: the size-derived number a rule reports is an upper bound, and the real ceiling can only be lower. Rules must say that out loud. If this is ever closed it has to be closed per family, keyed on the machine type the plan declares, and it must fail silent for any family not in the table.",
+    "source": "https://docs.cloud.google.com/compute/docs/disks/performance",
+    "verified_at": "2026-08-14",
+    "confidence": "high"
+  },
+
+  "reporting_floor": {
+    "read_iops": 100,
+    "confidence": "n/a",
+    "notes": "NOT a Google number. This is headroom's own reporting threshold: below roughly 100 sustained read IOPS a disk cannot carry a database, a busy log, or a container image pull without queueing, and that is the point at which stating the number earns a line of output. It is a judgement call and the finding says so, which is also why this rule never reports critical: a small pd-standard scratch disk can be exactly the right choice."
+  }
+}

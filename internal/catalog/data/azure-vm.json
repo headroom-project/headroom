@@ -1,0 +1,83 @@
+{
+  "provider": "azure",
+  "domain": "virtual-machine-sizes",
+  "updated_at": "2026-08-14",
+
+  "coverage": "Deliberately partial. Azure publishes one page per VM series and there are well over a hundred series, so this table holds the four that generated terraform actually reaches for: the two burstable families and the general purpose and memory optimised v5 families. A size that is not here has no encoded ceiling and the rules must stay silent about it rather than interpolate.",
+
+  "burst_notes": "Azure B-series has no equivalent of the AWS T3 'unlimited' mode. There is no setting, no surcharge and no escape: when the credit balance reaches zero the virtual machine is throttled to its base CPU performance and stays there for as long as the load continues. That makes the B-series ceiling a latency cliff rather than a bill, which is the opposite of the AWS default and the reason this rule cannot be a copy of R7. Base CPU performance is expressed on a 0-100% scale across the whole VM since the 2024 renormalisation: a 2 vCPU size at 40% sustains 0.8 vCPUs, not 0.8 per core.",
+
+  "storage_notes": "Uncached IOPS and MB/s are the ceiling the VM imposes on every data disk attached with host caching set to None, added together. Disks attached with ReadOnly or ReadWrite caching are governed by a separate cached limit that this table does not carry, so a rule must only compare uncached disks against these numbers. Burst figures are the VM's, and both the disk and the VM have to be bursting at once for the burst number to be reachable.",
+
+  "series": {
+    "Bv1": {
+      "source": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/bv1-series",
+      "verified_at": "2026-08-14",
+      "confidence": "high",
+      "notes": "Previous generation, still the most common thing a model writes. The Microsoft page prints the size as 'Standard_B1ls2' in the basics and storage tables and 'Standard_B1ls' in the credit table; the trailing 2 is a footnote marker, and B1ls is the real name. B1ls is Linux only."
+    },
+    "Bsv2": {
+      "source": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/bsv2-series",
+      "verified_at": "2026-08-14",
+      "confidence": "high",
+      "notes": "The current burstable family. Same credit model as Bv1 with a cleaner baseline ladder and much higher uncached disk limits."
+    },
+    "Dsv5": {
+      "source": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dsv5-series",
+      "verified_at": "2026-08-14",
+      "confidence": "high",
+      "notes": "No local temp disk."
+    },
+    "Esv5": {
+      "source": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/esv5-series",
+      "verified_at": "2026-08-14",
+      "confidence": "high",
+      "notes": "No local temp disk. Memory sizes are printed as GB on the Microsoft page and as GiB elsewhere; recorded as printed."
+    }
+  },
+
+  "sizes": {
+    "Standard_B1ls":  {"series": "Bv1", "vcpus": 1,  "memory_gib": 0.5, "baseline_pct": 5,    "credits_per_hour": 3,   "max_banked_credits": 72,    "uncached_iops": 160,   "uncached_mbps": 10,   "burst_iops": 4000,  "burst_mbps": 100},
+    "Standard_B1s":   {"series": "Bv1", "vcpus": 1,  "memory_gib": 1,   "baseline_pct": 10,   "credits_per_hour": 6,   "max_banked_credits": 144,   "uncached_iops": 320,   "uncached_mbps": 10,   "burst_iops": 4000,  "burst_mbps": 100},
+    "Standard_B1ms":  {"series": "Bv1", "vcpus": 1,  "memory_gib": 2,   "baseline_pct": 20,   "credits_per_hour": 12,  "max_banked_credits": 288,   "uncached_iops": 640,   "uncached_mbps": 10,   "burst_iops": 4000,  "burst_mbps": 100},
+    "Standard_B2s":   {"series": "Bv1", "vcpus": 2,  "memory_gib": 4,   "baseline_pct": 20,   "credits_per_hour": 24,  "max_banked_credits": 576,   "uncached_iops": 1280,  "uncached_mbps": 15,   "burst_iops": 4000,  "burst_mbps": 100},
+    "Standard_B2ms":  {"series": "Bv1", "vcpus": 2,  "memory_gib": 8,   "baseline_pct": 30,   "credits_per_hour": 36,  "max_banked_credits": 864,   "uncached_iops": 1920,  "uncached_mbps": 22.5, "burst_iops": 4000,  "burst_mbps": 100},
+    "Standard_B4ms":  {"series": "Bv1", "vcpus": 4,  "memory_gib": 16,  "baseline_pct": 22.5, "credits_per_hour": 54,  "max_banked_credits": 1296,  "uncached_iops": 2880,  "uncached_mbps": 35,   "burst_iops": 8000,  "burst_mbps": 200},
+    "Standard_B8ms":  {"series": "Bv1", "vcpus": 8,  "memory_gib": 32,  "baseline_pct": 17,   "credits_per_hour": 81,  "max_banked_credits": 1994,  "uncached_iops": 4320,  "uncached_mbps": 50,   "burst_iops": 8000,  "burst_mbps": 200},
+    "Standard_B12ms": {"series": "Bv1", "vcpus": 12, "memory_gib": 48,  "baseline_pct": 17,   "credits_per_hour": 121, "max_banked_credits": 2908,  "uncached_iops": 4320,  "uncached_mbps": 50,   "burst_iops": 16000, "burst_mbps": 400},
+    "Standard_B16ms": {"series": "Bv1", "vcpus": 16, "memory_gib": 64,  "baseline_pct": 17,   "credits_per_hour": 162, "max_banked_credits": 3888,  "uncached_iops": 4320,  "uncached_mbps": 50,   "burst_iops": 16000, "burst_mbps": 400},
+    "Standard_B20ms": {"series": "Bv1", "vcpus": 20, "memory_gib": 80,  "baseline_pct": 17,   "credits_per_hour": 202, "max_banked_credits": 4867,  "uncached_iops": 4320,  "uncached_mbps": 50,   "burst_iops": 16000, "burst_mbps": 400},
+
+    "Standard_B2ts_v2":  {"series": "Bsv2", "vcpus": 2,  "memory_gib": 1,   "baseline_pct": 20, "credits_per_hour": 24,  "max_banked_credits": 576,   "uncached_iops": 3750,  "uncached_mbps": 85,  "burst_iops": 10000, "burst_mbps": 960},
+    "Standard_B2ls_v2":  {"series": "Bsv2", "vcpus": 2,  "memory_gib": 4,   "baseline_pct": 30, "credits_per_hour": 36,  "max_banked_credits": 864,   "uncached_iops": 3750,  "uncached_mbps": 85,  "burst_iops": 10000, "burst_mbps": 960},
+    "Standard_B2s_v2":   {"series": "Bsv2", "vcpus": 2,  "memory_gib": 8,   "baseline_pct": 40, "credits_per_hour": 48,  "max_banked_credits": 1152,  "uncached_iops": 3750,  "uncached_mbps": 85,  "burst_iops": 10000, "burst_mbps": 960},
+    "Standard_B4ls_v2":  {"series": "Bsv2", "vcpus": 4,  "memory_gib": 8,   "baseline_pct": 30, "credits_per_hour": 72,  "max_banked_credits": 1728,  "uncached_iops": 6400,  "uncached_mbps": 145, "burst_iops": 20000, "burst_mbps": 960},
+    "Standard_B4s_v2":   {"series": "Bsv2", "vcpus": 4,  "memory_gib": 16,  "baseline_pct": 40, "credits_per_hour": 96,  "max_banked_credits": 2304,  "uncached_iops": 6400,  "uncached_mbps": 145, "burst_iops": 20000, "burst_mbps": 960},
+    "Standard_B8ls_v2":  {"series": "Bsv2", "vcpus": 8,  "memory_gib": 16,  "baseline_pct": 30, "credits_per_hour": 144, "max_banked_credits": 3456,  "uncached_iops": 12800, "uncached_mbps": 290, "burst_iops": 20000, "burst_mbps": 960},
+    "Standard_B8s_v2":   {"series": "Bsv2", "vcpus": 8,  "memory_gib": 32,  "baseline_pct": 40, "credits_per_hour": 192, "max_banked_credits": 4608,  "uncached_iops": 12800, "uncached_mbps": 290, "burst_iops": 20000, "burst_mbps": 960},
+    "Standard_B16ls_v2": {"series": "Bsv2", "vcpus": 16, "memory_gib": 32,  "baseline_pct": 30, "credits_per_hour": 288, "max_banked_credits": 6912,  "uncached_iops": 25600, "uncached_mbps": 600, "burst_iops": 40000, "burst_mbps": 960},
+    "Standard_B16s_v2":  {"series": "Bsv2", "vcpus": 16, "memory_gib": 64,  "baseline_pct": 40, "credits_per_hour": 384, "max_banked_credits": 9216,  "uncached_iops": 25600, "uncached_mbps": 600, "burst_iops": 40000, "burst_mbps": 960},
+    "Standard_B32ls_v2": {"series": "Bsv2", "vcpus": 32, "memory_gib": 64,  "baseline_pct": 30, "credits_per_hour": 576, "max_banked_credits": 13824, "uncached_iops": 51200, "uncached_mbps": 600, "burst_iops": 80000, "burst_mbps": 960},
+    "Standard_B32s_v2":  {"series": "Bsv2", "vcpus": 32, "memory_gib": 128, "baseline_pct": 40, "credits_per_hour": 768, "max_banked_credits": 18432, "uncached_iops": 51200, "uncached_mbps": 600, "burst_iops": 80000, "burst_mbps": 960},
+
+    "Standard_D2s_v5":  {"series": "Dsv5", "vcpus": 2,  "memory_gib": 8,   "uncached_iops": 3750,  "uncached_mbps": 85,   "burst_iops": 10000, "burst_mbps": 1200},
+    "Standard_D4s_v5":  {"series": "Dsv5", "vcpus": 4,  "memory_gib": 16,  "uncached_iops": 6400,  "uncached_mbps": 145,  "burst_iops": 20000, "burst_mbps": 1200},
+    "Standard_D8s_v5":  {"series": "Dsv5", "vcpus": 8,  "memory_gib": 32,  "uncached_iops": 12800, "uncached_mbps": 290,  "burst_iops": 20000, "burst_mbps": 1200},
+    "Standard_D16s_v5": {"series": "Dsv5", "vcpus": 16, "memory_gib": 64,  "uncached_iops": 25600, "uncached_mbps": 600,  "burst_iops": 40000, "burst_mbps": 1200},
+    "Standard_D32s_v5": {"series": "Dsv5", "vcpus": 32, "memory_gib": 128, "uncached_iops": 51200, "uncached_mbps": 865,  "burst_iops": 80000, "burst_mbps": 2000},
+    "Standard_D48s_v5": {"series": "Dsv5", "vcpus": 48, "memory_gib": 192, "uncached_iops": 76800, "uncached_mbps": 1315, "burst_iops": 80000, "burst_mbps": 3000},
+    "Standard_D64s_v5": {"series": "Dsv5", "vcpus": 64, "memory_gib": 256, "uncached_iops": 80000, "uncached_mbps": 1735, "burst_iops": 80000, "burst_mbps": 3000},
+    "Standard_D96s_v5": {"series": "Dsv5", "vcpus": 96, "memory_gib": 384, "uncached_iops": 80000, "uncached_mbps": 2600, "burst_iops": 80000, "burst_mbps": 4000},
+
+    "Standard_E2s_v5":    {"series": "Esv5", "vcpus": 2,   "memory_gib": 16,  "uncached_iops": 3750,   "uncached_mbps": 85,   "burst_iops": 10000,  "burst_mbps": 1200},
+    "Standard_E4s_v5":    {"series": "Esv5", "vcpus": 4,   "memory_gib": 32,  "uncached_iops": 6400,   "uncached_mbps": 145,  "burst_iops": 20000,  "burst_mbps": 1200},
+    "Standard_E8s_v5":    {"series": "Esv5", "vcpus": 8,   "memory_gib": 64,  "uncached_iops": 12800,  "uncached_mbps": 290,  "burst_iops": 20000,  "burst_mbps": 1200},
+    "Standard_E16s_v5":   {"series": "Esv5", "vcpus": 16,  "memory_gib": 128, "uncached_iops": 25600,  "uncached_mbps": 600,  "burst_iops": 40000,  "burst_mbps": 1200},
+    "Standard_E20s_v5":   {"series": "Esv5", "vcpus": 20,  "memory_gib": 160, "uncached_iops": 32000,  "uncached_mbps": 750,  "burst_iops": 64000,  "burst_mbps": 1600},
+    "Standard_E32s_v5":   {"series": "Esv5", "vcpus": 32,  "memory_gib": 256, "uncached_iops": 51200,  "uncached_mbps": 865,  "burst_iops": 80000,  "burst_mbps": 2000},
+    "Standard_E48s_v5":   {"series": "Esv5", "vcpus": 48,  "memory_gib": 384, "uncached_iops": 76800,  "uncached_mbps": 1315, "burst_iops": 80000,  "burst_mbps": 3000},
+    "Standard_E64s_v5":   {"series": "Esv5", "vcpus": 64,  "memory_gib": 512, "uncached_iops": 80000,  "uncached_mbps": 1735, "burst_iops": 80000,  "burst_mbps": 3000},
+    "Standard_E96s_v5":   {"series": "Esv5", "vcpus": 96,  "memory_gib": 672, "uncached_iops": 80000,  "uncached_mbps": 2600, "burst_iops": 80000,  "burst_mbps": 4000},
+    "Standard_E104is_v5": {"series": "Esv5", "vcpus": 104, "memory_gib": 672, "uncached_iops": 120000, "uncached_mbps": 4000, "burst_iops": 120000, "burst_mbps": 4000}
+  }
+}
