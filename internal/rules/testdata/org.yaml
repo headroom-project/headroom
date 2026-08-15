@@ -1,0 +1,51 @@
+version: 1
+
+defaults:
+  scale_ratio_warn: 4
+
+rules:
+  R4:
+    enabled: false
+  R2:
+    severity: info
+
+catalog:
+  rds_max_connections:
+    aws_db_instance.main: 2000
+
+exceptions:
+  - rule: R7
+    resource: aws_instance.node
+    reason: "Sandbox account, burstable is the point"
+    expires: 2026-12-31
+
+custom:
+  - id: ORG-001
+    title: gp2 volumes are not allowed
+    severity: critical
+    match:
+      type: aws_ebs_volume
+      where:
+        - attr: type
+          equals: gp2
+    summary: "{{address}} uses gp2 at {{attr:size}} GiB. The standard here is gp3."
+    detail:
+      - "gp3 has no credit bucket."
+
+  - id: ORG-002
+    title: Subnets must be a /24 or larger
+    match:
+      type: aws_subnet
+      where:
+        - attr: cidr_block
+          cidr_prefix_gt: 24
+    summary: "{{address}} is {{attr:cidr_block}}, smaller than the /24 minimum."
+
+  - id: ORG-003
+    title: Root volumes must be gp3
+    match:
+      type: aws_instance
+      where:
+        - attr: root_block_device.volume_type
+          not_equals: gp3
+    summary: "{{address}} has a root volume that is not gp3."
