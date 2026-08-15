@@ -17,13 +17,18 @@ var label = map[string]string{
 // Text writes the human report. The critical finding has to survive being
 // pasted into a team chat with no other context, because that is how the
 // product spreads.
-func Text(w io.Writer, findings []rules.Finding, planPath string) {
-	fmt.Fprintf(w, "headroom  %s\n\n", planPath)
+//
+// noColor forces plain output. When it is false the decision is still made by
+// wantColour, which honours NO_COLOR and refuses to write escapes into a pipe.
+func Text(w io.Writer, findings []rules.Finding, planPath string, noColor bool) {
+	p := palette{on: wantColour(w, noColor)}
+
+	fmt.Fprintf(w, "%s  %s\n\n", p.s(styBold, "headroom"), p.s(styDim, planPath))
 
 	if len(findings) == 0 {
 		fmt.Fprintln(w, "No capacity ceiling reached by the workloads in this plan.")
-		fmt.Fprintln(w, "Silence means the rules found nothing they could ground, not that the")
-		fmt.Fprintln(w, "infrastructure is safe: run with --explain to see what was skipped.")
+		fmt.Fprintln(w, p.s(styDim, "Silence means the rules found nothing they could ground, not that the"))
+		fmt.Fprintln(w, p.s(styDim, "infrastructure is safe: run with --explain to see what was skipped."))
 		return
 	}
 
@@ -43,11 +48,16 @@ func Text(w io.Writer, findings []rules.Finding, planPath string) {
 		}
 		suffix := ""
 		if f.Instances > 1 {
-			suffix = fmt.Sprintf("  (x%d instances)", f.Instances)
+			suffix = p.s(styDim, fmt.Sprintf("  (x%d instances)", f.Instances))
 		}
-		fmt.Fprintf(w, "%s  [%s] %s%s\n", label[f.Severity], f.Rule, f.Title, suffix)
+		fmt.Fprintf(w, "%s  %s %s%s\n",
+			p.severity(f.Severity, label[f.Severity]),
+			p.s(styDim, "["+f.Rule+"]"),
+			p.s(styBold, f.Title),
+			suffix)
+
 		for _, line := range wrap(f.Summary, 76) {
-			fmt.Fprintf(w, "  %s\n", line)
+			fmt.Fprintf(w, "  %s\n", p.tokens(line))
 		}
 		if len(f.Detail) > 0 {
 			fmt.Fprintln(w)
@@ -57,18 +67,21 @@ func Text(w io.Writer, findings []rules.Finding, planPath string) {
 					if j > 0 {
 						prefix = "      "
 					}
-					fmt.Fprintf(w, "%s%s\n", prefix, line)
+					fmt.Fprintf(w, "%s%s\n", prefix, p.tokens(line))
 				}
 			}
 		}
-		fmt.Fprintf(w, "\n  confidence: %s", f.Confidence)
+		fmt.Fprintf(w, "\n  %s", p.s(styDim, "confidence: "+f.Confidence))
 		if f.Source != "" {
-			fmt.Fprintf(w, "  |  source: %s", f.Source)
+			fmt.Fprintf(w, "%s", p.s(styDim, "  |  source: "+f.Source))
 		}
 		fmt.Fprintln(w)
 	}
 
-	fmt.Fprintf(w, "\n%d critical, %d warning, %d total\n", critical, warning, len(findings))
+	fmt.Fprintf(w, "\n%s, %s, %s\n",
+		p.severity(rules.SeverityCritical, fmt.Sprintf("%d critical", critical)),
+		p.severity(rules.SeverityWarning, fmt.Sprintf("%d warning", warning)),
+		p.s(styBold, fmt.Sprintf("%d total", len(findings))))
 }
 
 func wrap(s string, width int) []string {
