@@ -64,15 +64,24 @@ Exit codes, because this is meant to run in a pipeline:
 |---|---|
 | 0 | ran, and nothing matched `--fail-on` |
 | 1 | ran, and a finding matched `--fail-on` |
-| 2 | could not run |
+| 2 | could not run, or `--upload` failed to reach the API |
 
 Without `--fail-on` there is no gate at all, whatever the findings say. A capacity tool
 must never be the reason a deploy is stuck.
+
+**When 1 and 2 both apply, 1 wins.** A failed upload is reported on stderr and never
+overturns the `--fail-on` verdict. `--fail-on` asks a question about capacity, the
+network is not capacity, and exit 2 is the code this project tells people to treat as
+"the tool broke, carry on". Letting a network failure relabel a critical finding as a
+tool failure would hand CI the one signal that invites it to ignore the finding.
 
 | Flag | Purpose |
 |---|---|
 | `--json` | findings as JSON |
 | `--dry-run` | print the exact redacted payload that would be uploaded, upload nothing |
+| `--upload` | print the local report, then send that same payload to the API |
+| `--api-key K` | API key for `--upload`, `hr_live_...` (env `HEADROOM_API_KEY`) |
+| `--api-url U` | API base URL (env `HEADROOM_API_URL`, default `https://api.headroomcli.com`) |
 | `--pool-size N` | connections per task to assume when the task definition does not declare one (default 10) |
 | `--warn-at R` | utilization ratio that triggers a warning (default 0.8) |
 | `--salt S` | per-organization salt for hashing addresses (env `HEADROOM_SALT`) |
@@ -90,6 +99,47 @@ The CLI parses locally and reads by **allowlist, never denylist**. Terraform pla
 Said plainly, because a privacy claim that overstates itself is worse than one that does not: the allowlisted attributes travel **with their real values**. A subnet CIDR, an instance class and an allocated storage size are in the payload as themselves, because the ceiling cannot be recomputed without them. What is hashed is identity, not shape. Run `--dry-run` and you are looking at all of it.
 
 One dependency, `gopkg.in/yaml.v3`, which has no dependencies of its own. Everything else is the standard library, because this runs inside customer environments and every transitive dependency is supply-chain surface someone has to defend during a security review. The CLI makes no network calls at all unless you ask it to upload.
+
+## Uploading
+
+```bash
+export HEADROOM_API_KEY=hr_live_...
+export HEADROOM_SALT=...          # per organization, not per run
+headroom analyze plan.json --upload
+```
+
+`--upload` prints the local report first and sends afterwards, so a failed upload costs
+you a retry and never your analysis. It is `POST /v1/reports` with a bearer token: **one
+attempt, a 30 second timeout, no retry**, because a tool that retries on failure turns a
+brief outage at the API into a self-inflicted one multiplied by every pipeline running
+it. An error names the status code and, when the response carries one, the server's
+stable `error.code`.
+
+What is sent is byte for byte what `--dry-run` prints. Not a payload that resembles it:
+the same bytes, from the same function, with one call site, and a test that compares the
+two byte sequences rather than asserting they look similar. That is what makes the
+privacy section above auditable instead of merely stated.
+
+Three things `--upload` refuses to do:
+
+- **Upload without a salt**, and there is no flag to override it. Unsalted, a resource id
+  is a plain SHA-256 of a low-entropy address like `aws_db_instance.main`, which a
+  dictionary of a few thousand guesses reverses, and unsalted ids from two organizations
+  collide. `--dry-run` only warns, because printing it locally harms nobody; sending it is
+  a different act. An override flag would be pasted into a CI config once, in a hurry, and
+  would then be the setting forever, so the answer is to set a salt.
+- **Send a bearer token in cleartext.** An `http://` API URL is refused unless the host is
+  loopback, which is where a test server or a local proxy lives.
+- **Run with `--dry-run`.** The two flags contradict each other, and a silent winner turns
+  somebody's rehearsal into an upload.
+
+The API key never appears in output: not in the payload, not in an error, and not in the
+usage block a mistyped flag prints. If a server echoes the key back inside an error
+message it is redacted on the way to your terminal.
+
+`--upload` is the only thing in this repository that opens a socket, and it lives in one
+small package, [`internal/upload`](internal/upload/upload.go), so that stays easy to
+check.
 
 ## Configuration
 
