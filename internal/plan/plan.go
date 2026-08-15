@@ -88,16 +88,27 @@ func Load(path string) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
+	f, err := Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return f, nil
+}
+
+// Parse decodes a plan JSON that arrived from anywhere. It is separate from
+// Load so the parser can be fuzzed without a file on disk, which matters
+// because this is the one place the tool reads input it did not produce.
+func Parse(raw []byte) (*File, error) {
 	// PowerShell redirection writes a UTF-8 BOM, and `terraform show -json > plan.json`
 	// is exactly how a Windows user produces this file.
 	raw = bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})
 
 	var f File
 	if err := json.Unmarshal(raw, &f); err != nil {
-		return nil, fmt.Errorf("%s is not a terraform plan JSON: %w", path, err)
+		return nil, fmt.Errorf("not a terraform plan JSON: %w", err)
 	}
 	if f.FormatVersion == "" {
-		return nil, fmt.Errorf("%s has no format_version; generate it with: terraform show -json tfplan > plan.json", path)
+		return nil, fmt.Errorf("no format_version; generate it with: terraform show -json tfplan > plan.json")
 	}
 	return &f, nil
 }
