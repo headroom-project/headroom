@@ -1,0 +1,9 @@
+headroom
+Copyright 2026 The headroom authors
+
+This product includes software developed at the headroom project
+(https://github.com/headroom-project/headroom).
+
+The ceiling catalog under internal/catalog/data/ is compiled from the public
+documentation of Amazon Web Services, Microsoft Azure and Google Cloud. Each
+entry carries the source URL it was read from and the date it was verified.
