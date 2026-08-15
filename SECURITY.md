@@ -75,8 +75,7 @@ sha256sum -c checksums.txt --ignore-missing
 
 # 2. the checksum file itself came from this repository's release workflow
 cosign verify-blob \
-  --certificate checksums.txt.pem \
-  --signature checksums.txt.sig \
+  --bundle checksums.txt.bundle \
   --certificate-identity-regexp 'https://github.com/headroom-project/headroom/.github/workflows/release.yml@refs/tags/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums.txt

@@ -49,9 +49,13 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
+          # The dry run skips publishing and nothing else. It used to skip signing
+          # too, which meant the rehearsal proved every step except the one that
+          # then failed on the real tag. A rehearsal that skips the risky part is
+          # not a rehearsal.
           args: >-
             release --clean
-            ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--snapshot --skip=publish,sign' || '' }}
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--snapshot --skip=publish' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

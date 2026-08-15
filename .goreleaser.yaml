@@ -54,11 +54,15 @@ checksum:
 # than to a person, which is the property that survives a laptop being stolen.
 signs:
   - cmd: cosign
-    certificate: "${artifact}.pem"
+    # One bundle instead of a separate .sig and .pem. cosign v3 defaults to the
+    # new bundle format, under which --output-signature and --output-certificate
+    # are accepted, warned about, and then ignored, so the flags that used to be
+    # here produced no files and cosign died trying to write a bundle to the
+    # empty path it had been given by default.
+    signature: "${artifact}.bundle"
     args:
       - sign-blob
-      - "--output-certificate=${certificate}"
-      - "--output-signature=${signature}"
+      - "--bundle=${artifact}.bundle"
       - "${artifact}"
       - "--yes"
     artifacts: checksum
@@ -101,9 +105,9 @@ release:
     sha256sum -c checksums.txt --ignore-missing
 
     # and that the checksums themselves came from this repository's release workflow
+    curl -LO https://github.com/headroom-project/headroom/releases/download/{{ .Tag }}/checksums.txt.bundle
     cosign verify-blob \
-      --certificate checksums.txt.pem \
-      --signature checksums.txt.sig \
+      --bundle checksums.txt.bundle \
       --certificate-identity-regexp 'https://github.com/headroom-project/headroom/.github/workflows/release.yml@refs/tags/.*' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com \
       checksums.txt
