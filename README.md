@@ -28,7 +28,7 @@ Every rule is the same statement wearing different clothes: **scale asymmetry**,
 ## Install
 
 ```bash
-curl -fsSL https://headroom.dev/install.sh | sh
+curl -fsSL https://headroomcli.com/install.sh | sh
 ```
 
 The script downloads the release archive **and** the published checksums, verifies one
