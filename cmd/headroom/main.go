@@ -64,7 +64,11 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 	dryRun := fs.Bool("dry-run", false, "print the exact redacted payload that would be uploaded, and upload nothing")
 	poolSize := fs.Int("pool-size", 10, "connections per task to assume when the task definition does not declare one")
 	warnAt := fs.Float64("warn-at", 0.8, "utilization ratio above which a headroom warning fires")
-	salt := fs.String("salt", os.Getenv("HEADROOM_SALT"), "per-organization salt for hashing resource addresses (env: HEADROOM_SALT)")
+	// The environment is read after Parse, never as a flag default. A default is
+	// printed verbatim by PrintDefaults, and PrintDefaults runs on any flag
+	// error, so a default taken from the environment would write HEADROOM_SALT
+	// to stderr the first time somebody mistyped a flag.
+	salt := fs.String("salt", "", "per-organization salt for hashing resource addresses (env: HEADROOM_SALT)")
 	failOn := fs.String("fail-on", "", "exit non-zero when a finding of this severity or worse exists (critical|warning)")
 	configPath := fs.String("config", os.Getenv("HEADROOM_CONFIG"), "path to headroom.yaml (default: discovered next to the plan, then in the working directory)")
 	noConfig := fs.Bool("no-config", false, "ignore any headroom.yaml and run the built-in rules at their defaults")
@@ -72,6 +76,7 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 	if err := fs.Parse(args[1:]); err != nil {
 		return exitError, err
 	}
+	*salt = orEnv(*salt, "HEADROOM_SALT")
 	if fs.NArg() != 1 {
 		return exitError, fmt.Errorf("expected exactly one plan JSON file (generate it with: terraform show -json tfplan > plan.json)")
 	}
@@ -146,6 +151,15 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 		return exitFinding, nil
 	}
 	return exitOK, nil
+}
+
+// orEnv prefers what was typed on the command line and falls back to the
+// environment, which is what CI has instead of a command line.
+func orEnv(v, key string) string {
+	if v != "" {
+		return v
+	}
+	return os.Getenv(key)
 }
 
 // applyDefaults lets the config set thresholds, while an explicitly typed flag

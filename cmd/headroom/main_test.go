@@ -103,6 +103,31 @@ func TestFailOnTypoIsRejectedRatherThanQuietlyWeakened(t *testing.T) {
 	}
 }
 
+// A flag whose default comes from os.Getenv has that default printed back by
+// PrintDefaults, and PrintDefaults runs on any flag error. So a single mistyped
+// flag used to write HEADROOM_SALT straight into stderr, which in CI means
+// straight into a log a whole team can read. The environment is read after
+// Parse instead, and this is the test that says so.
+func TestAFlagErrorNeverPrintsASecretFromTheEnvironment(t *testing.T) {
+	t.Setenv("HEADROOM_SALT", "salt-from-the-environment")
+
+	r := exec(t, "analyze", "--not-a-flag", fixtureCritical)
+	if r.code != exitError {
+		t.Fatalf("code = %d, want %d", r.code, exitError)
+	}
+	if strings.Contains(r.stderr, "salt-from-the-environment") {
+		t.Errorf("a flag error printed the salt from the environment: %s", r.stderr)
+	}
+	if strings.Contains(r.stdout, "salt-from-the-environment") {
+		t.Error("a flag error printed the salt on stdout")
+	}
+	// The salt still has to work, or the fix broke the flag it was fixing.
+	ok := exec(t, "analyze", "--dry-run", fixtureCritical)
+	if strings.Contains(ok.stderr, "no salt set") {
+		t.Error("HEADROOM_SALT stopped being read at all")
+	}
+}
+
 func TestFailOnCriticalExitsOneOnACriticalPlan(t *testing.T) {
 	r := exec(t, "analyze", "--fail-on", "critical", fixtureCritical)
 	if r.code != exitFinding {
