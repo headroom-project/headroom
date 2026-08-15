@@ -41,7 +41,9 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
-      - uses: sigstore/cosign-installer@v4
+      # v3 is the newest floating major this action publishes. There are v4.x
+      # releases but no v4 tag, so @v4 does not resolve.
+      - uses: sigstore/cosign-installer@v3
       - uses: anchore/sbom-action/download-syft@v0
 
       - name: goreleaser
