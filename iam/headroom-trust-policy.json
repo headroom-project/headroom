@@ -1,0 +1,18 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "HeadroomCollectorMayAssumeWithExternalId",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::REPLACE_WITH_HEADROOM_ACCOUNT_ID:role/headroom-collector"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": {
+          "sts:ExternalId": "REPLACE_WITH_YOUR_EXTERNAL_ID"
+        }
+      }
+    }
+  ]
+}
