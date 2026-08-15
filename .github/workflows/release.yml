@@ -22,7 +22,7 @@ jobs:
       id-token: write # keyless cosign signing through Sigstore
       attestations: write # build provenance for every artifact
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # goreleaser builds the changelog from history
 
