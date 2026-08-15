@@ -1,0 +1,11 @@
+bin/
+dist/
+coverage.out
+
+# Terraform working state from the fixtures. plan.json is committed on purpose:
+# it keeps the tests hermetic, and the fixture describes infrastructure that
+# does not exist.
+.terraform/
+tfplan
+*.tfstate
+*.tfstate.backup

@@ -1,0 +1,14 @@
+# The repository is authored on Windows and consumed on Linux and macOS. LF in
+# the repository is not a preference here: install.sh is fetched and piped
+# straight into sh, and a CRLF in that file makes the shebang and every command
+# fail on the machines it is meant to run on.
+* text=auto eol=lf
+
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.tar.gz binary
