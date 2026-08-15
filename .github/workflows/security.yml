@@ -118,7 +118,7 @@ jobs:
 
       # Blocks a pull request that would add a dependency carrying a known
       # advisory, before it is ever merged.
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: low
           comment-summary-in-pr: always
