@@ -84,6 +84,44 @@ jobs:
             echo "ok $target"
           done
 
+  action-refs:
+    name: action refs resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # `goreleaser check` validates the release config and says nothing about
+      # whether the release workflow's own actions exist. That gap is not
+      # theoretical: sigstore/cosign-installer publishes v4.x releases but no
+      # floating v4 tag, and ossf/scorecard-action publishes no floating major
+      # at all. Either one only fails on the job that uses it, and for the
+      # release workflow that means at tag time, which is the one moment where
+      # the only fix is a second tag.
+      - name: every `uses:` must resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          missing=0
+          refs=$(grep -rhoE '^\s*-?\s*uses:\s*[^ #]+' .github/workflows/ \
+                 | sed -E 's/.*uses:\s*//' | sort -u)
+          for ref in $refs; do
+            case "$ref" in
+              ./*|docker://*) echo "skip   $ref"; continue ;;
+            esac
+            repo=$(printf '%s' "${ref%%@*}" | cut -d/ -f1,2)
+            tag=${ref##*@}
+            if gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha >/dev/null 2>&1 ||
+               gh api "repos/$repo/git/ref/heads/$tag" --jq .object.sha >/dev/null 2>&1 ||
+               gh api "repos/$repo/commits/$tag" --jq .sha >/dev/null 2>&1; then
+              echo "ok     $ref"
+            else
+              echo "MISSING $ref"
+              missing=1
+            fi
+          done
+          exit $missing
+
   goreleaser-config:
     name: goreleaser config
     runs-on: ubuntu-latest
