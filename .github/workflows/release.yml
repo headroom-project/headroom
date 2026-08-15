@@ -60,7 +60,7 @@ jobs:
       # attestation verify` without trusting anything this repository says.
       - name: attest the artifacts
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/headroom_*.tar.gz,dist/headroom_*.zip
 
