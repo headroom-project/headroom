@@ -1,0 +1,112 @@
+version: 2
+
+project_name: headroom
+
+before:
+  hooks:
+    - go mod tidy
+    - go vet ./...
+
+builds:
+  - id: headroom
+    main: ./cmd/headroom
+    binary: headroom
+    env:
+      - CGO_ENABLED=0
+    # A static binary with no cgo is the whole distribution story: no runtime to
+    # install, nothing to link against, and nothing for a customer's security
+    # review to ask about.
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      # Windows on arm64 is not a platform this tool has a user on yet, and an
+      # untested artifact is worse than an absent one.
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: headroom
+    ids: [headroom]
+    # No version in the archive name, on purpose: the site links to
+    # /releases/latest/download/headroom_linux_amd64.tar.gz, and that redirect
+    # only works against a filename that does not move between releases.
+    name_template: "headroom_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+      - headroom.example.yaml
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# Keyless signing through Sigstore. There is no private key to lose, and the
+# certificate ties the signature to this repository's workflow identity rather
+# than to a person, which is the property that survives a laptop being stolen.
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+sboms:
+  - id: archive-sbom
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.json"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+  groups:
+    - title: Rules and catalog
+      regexp: '^.*?(feat|catalog|rule)(\(.+\))??:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??:.+$'
+      order: 1
+    - title: Other
+      order: 99
+
+release:
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Verify what you downloaded
+
+    ```bash
+    # checksums
+    curl -LO https://github.com/headroom-project/headroom/releases/download/{{ .Tag }}/checksums.txt
+    sha256sum -c checksums.txt --ignore-missing
+
+    # and that the checksums themselves came from this repository's release workflow
+    cosign verify-blob \
+      --certificate checksums.txt.pem \
+      --signature checksums.txt.sig \
+      --certificate-identity-regexp 'https://github.com/headroom-project/headroom/.github/workflows/release.yml@refs/tags/.*' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      checksums.txt
+    ```
+
+    An SBOM in SPDX form ships next to every archive.
