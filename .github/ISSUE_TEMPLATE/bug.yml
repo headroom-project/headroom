@@ -1,0 +1,62 @@
+name: Bug
+description: Something crashed, or behaved differently from what it says it does
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this is a **vulnerability**, please do not use this form. Report it
+        privately through
+        [Security advisories](https://github.com/headroom-project/headroom/security/advisories/new).
+
+        If a finding quoted a **wrong number**, use the "A number is wrong" template
+        instead, which asks for the vendor source.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: >
+        The command you ran, and the shape of the terraform if you can share it. A
+        minimal `main.tf` that produces the behaviour is worth more than a description
+        of a large one. Your plan file never has to leave your machine: please do not
+        attach one.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: headroom version
+      placeholder: headroom 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and architecture
+      placeholder: linux/amd64
+    validations:
+      required: true
+
+  - type: input
+    id: terraform
+    attributes:
+      label: Terraform version that produced the plan
+      placeholder: "1.15.8"

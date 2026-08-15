@@ -199,6 +199,24 @@ release cannot ship past an advisory that CI would have caught.
 To report a vulnerability, see [`SECURITY.md`](SECURITY.md). Please do not open a public
 issue for one.
 
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the setup, the pull request flow and what a
+change has to carry. Two rules matter more than the rest:
+
+**New behaviour arrives with a test, and a fix arrives with a test that fails without
+it.** Two ceilings once shipped wrong through a fully green suite, because the tests
+asserted that the code did what the catalog said and said nothing about whether the
+catalog was true.
+
+**No catalog entry ships without `source`, `verified_at` and `confidence`,** where the
+source is a deep link to the vendor page that states the figure. If a number cannot be
+found in official documentation, leave it out and let the rule stay silent.
+
+A finding that quotes a wrong number is the most valuable bug report this project can
+receive. There is an [issue template](.github/ISSUE_TEMPLATE/wrong-number.yml) for
+exactly that.
+
 ## Development
 
 ```bash
