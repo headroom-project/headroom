@@ -35,7 +35,7 @@ jobs:
           check-latest: true
 
       - name: install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
 
       # govulncheck is symbol-level, not version-level: it reports an advisory
       # only when a code path actually reaches the vulnerable function. That is
