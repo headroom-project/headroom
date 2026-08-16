@@ -87,7 +87,9 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 						if catalog.AzureIsPremiumV2(disk.accountType) {
 							v2Present = true
 						}
-						resources = append(resources, disk.addr)
+						if !disk.inline {
+							resources = append(resources, disk.addr)
+						}
 						how := "states %d IOPS and %d MB/s on the resource"
 						if fromBaseline {
 							how = "runs at the free baseline of %d IOPS and %d MB/s, which the plan never states because it never has to"
@@ -102,7 +104,9 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 				mbps += float64(tier.MBps)
 				counted++
 				tierSource = tier.Source
-				resources = append(resources, disk.addr)
+				if !disk.inline {
+					resources = append(resources, disk.addr)
+				}
 				if tier.Kind == "Standard SSD" {
 					upToTier, upToNote = true, tier.Notes
 					detail = append(detail, fmt.Sprintf(
@@ -228,7 +232,11 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 }
 
 type azDisk struct {
-	addr        string
+	addr string
+	// inline disks are declared inside the VM block and have no address of
+	// their own, so the label above is for a human reading the detail and must
+	// never be handed to anything that expects a terraform address.
+	inline      bool
 	accountType string
 	sizeGiB     int
 	iops        int
@@ -292,6 +300,7 @@ func azUncachedDisks(g *graph.Graph, vm, vmType string) []azDisk {
 			}
 			out = append(out, azDisk{
 				addr:        vm + " (os_disk)",
+				inline:      true,
 				accountType: plan.Str(osDisk, "storage_account_type"),
 				sizeGiB:     size,
 			})
@@ -334,6 +343,7 @@ func azInlineDisks(g *graph.Graph, vm, block, typeKey string) []azDisk {
 			}
 			out = append(out, azDisk{
 				addr:        addr + ")",
+				inline:      true,
 				accountType: plan.Str(disk, typeKey),
 				sizeGiB:     size,
 			})
