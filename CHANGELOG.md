@@ -2,6 +2,31 @@
 
 Notable changes per release. Dates are the tag date.
 
+## Unreleased
+
+### Added
+
+- **headroom mentions when a newer release exists.** Providers move their
+  ceilings, so an old binary carries an old catalog and answers with an old
+  number in exactly the same format as the correct one. The notice says that,
+  because the reason to upgrade this tool is correctness rather than features.
+
+  It runs at most once a day, and only when stderr is a terminal, so it never
+  appears in CI, through a pipe or from cron. It is one anonymous `GET` to the
+  public release list, carrying no query string, no identifier and no version in
+  the `User-Agent`. It downloads and installs nothing. It cannot fail, delay or
+  change a run, and it writes to stderr only, so `--json` and `--dry-run` are
+  untouched. Turn it off with `--no-update-check` or
+  `HEADROOM_NO_UPDATE_CHECK=1`, which the notice itself tells you.
+
+  A build from source reports `dev`, which has no place on the number line, so
+  it is never told anything and never asks.
+
+### Internal
+
+- TTY detection moved to `internal/tty`, so colour and the update check cannot
+  answer "is a person watching" differently.
+
 ## v0.2.0, 2026-08-16
 
 The release that came out of running the tool against seven real production
