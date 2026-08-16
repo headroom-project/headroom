@@ -14,6 +14,7 @@ const (
 	fixtureAzureAKS     = "../../fixtures/azure-01-aks-postgres/plan.json"
 	fixtureAzureHybrid  = "../../fixtures/azure-02-vm-disk-vpn/plan.json"
 	fixtureAzureModules = "../../fixtures/azure-03-module-boundary/plan.json"
+	fixtureAzureAKSv3   = "../../fixtures/azure-04-aks-provider-v3/plan.json"
 )
 
 func analyzeAzure(t *testing.T, path string) []rules.Finding {
@@ -336,6 +337,46 @@ func TestAzureDiskOutrunsTheVM(t *testing.T) {
 	}
 	if got := f.Metrics["vm_iops"]; got != 1280 {
 		t.Errorf("vm_iops = %d, want 1280 uncached for Standard_B2s", got)
+	}
+}
+
+// azurerm 4.0 renamed enable_auto_scaling to auto_scaling_enabled. The same
+// cluster, planned by either provider, is the same cluster, so it has to be
+// worth the same verdict.
+//
+// Reading only the 4.x name did not make the rule quiet, which would have been
+// survivable. It made the rule wrong and confident: the pool fell through to
+// node_count, the finding said "node_count, no autoscaling" about a pool that
+// autoscales, and the separate pool that declares no node_count at all vanished
+// from the analysis.
+func TestAzureAKSVerdictDoesNotDependOnTheProviderVersion(t *testing.T) {
+	v4 := findAzure(analyzeAzure(t, fixtureAzureAKS), "AZ2", rules.SeverityCritical)
+	if v4 == nil {
+		t.Fatal("AZ2 missed the 4.x plan, so there is nothing to compare against")
+	}
+	v3 := findAzure(analyzeAzure(t, fixtureAzureAKSv3), "AZ2", rules.SeverityCritical)
+	if v3 == nil {
+		t.Fatal("AZ2 went quiet on the 3.x plan of the same cluster")
+	}
+
+	for _, metric := range []string{"demand", "usable"} {
+		if v3.Metrics[metric] != v4.Metrics[metric] {
+			t.Errorf("%s = %d under azurerm 3.x and %d under 4.x, and it is the same cluster",
+				metric, v3.Metrics[metric], v4.Metrics[metric])
+		}
+	}
+	if got := v3.Metrics["demand"]; got != 2220 {
+		t.Errorf("demand = %d, want 2220 (20 nodes x (1 + 110))", got)
+	}
+
+	// The wrong number came with a sentence that stated its cause, which is how
+	// a reader would have been talked out of noticing.
+	said := v3.Summary + "\n" + strings.Join(v3.Detail, "\n")
+	if strings.Contains(said, "no autoscaling") {
+		t.Errorf("the finding calls an autoscaling pool static: %s", said)
+	}
+	if !strings.Contains(said, "apps") {
+		t.Errorf("the separate node pool is absent from the finding: %s", said)
 	}
 }
 
