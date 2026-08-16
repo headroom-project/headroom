@@ -19,8 +19,8 @@ import (
 // found something" have to be distinguishable from the outside.
 
 const (
-	fixtureCritical = "../../fixtures/01-ecs-rds/plan.json"    // 3 critical, 2 warning
-	fixtureQuiet    = "../../fixtures/05-cross-repo/plan.json" // 0 critical, 1 warning
+	fixtureCritical     = "../../fixtures/01-ecs-rds/plan.json"    // 3 critical, 2 warning
+	fixtureQuiet        = "../../fixtures/05-cross-repo/plan.json" // 0 critical, 1 warning
 	fixtureAzureModules = "../../fixtures/azure-03-module-boundary/plan.json"
 )
 
