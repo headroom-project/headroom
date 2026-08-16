@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	fixtureAzureAKS    = "../../fixtures/azure-01-aks-postgres/plan.json"
-	fixtureAzureHybrid = "../../fixtures/azure-02-vm-disk-vpn/plan.json"
+	fixtureAzureAKS     = "../../fixtures/azure-01-aks-postgres/plan.json"
+	fixtureAzureHybrid  = "../../fixtures/azure-02-vm-disk-vpn/plan.json"
+	fixtureAzureModules = "../../fixtures/azure-03-module-boundary/plan.json"
 )
 
 func analyzeAzure(t *testing.T, path string) []rules.Finding {
@@ -335,6 +336,58 @@ func TestAzureDiskOutrunsTheVM(t *testing.T) {
 	}
 	if got := f.Metrics["vm_iops"]; got != 1280 {
 		t.Errorf("vm_iops = %d, want 1280 uncached for Standard_B2s", got)
+	}
+}
+
+// The same arithmetic as TestAzureDiskOutrunsTheVM, moved into the arrangement
+// every corporate repository actually uses: the VM in one module, the disks in
+// another, and the attachment in the root reaching both through outputs.
+//
+// Nothing about the capacity question changes when the code is split into
+// files, so nothing about the answer may change either. Until the graph could
+// follow a module output, this plan produced no findings at all, and the report
+// said the infrastructure was quiet rather than saying it could not tell.
+func TestAzureDiskOutrunsTheVMAcrossAModuleBoundary(t *testing.T) {
+	all := analyzeAzure(t, fixtureAzureModules)
+
+	f := findAzure(all, "AZ5", rules.SeverityWarning)
+	if f == nil {
+		t.Fatal("AZ5 missed three P30 disks attached to a Standard_D4s_v5 from a sibling module")
+	}
+	if got := f.Metrics["disks_counted"]; got != 3 {
+		t.Errorf("disks_counted = %d, want 3", got)
+	}
+	if got := f.Metrics["disk_iops"]; got != 15000 {
+		t.Errorf("disk_iops = %d, want 15000 for three P30", got)
+	}
+	if got := f.Metrics["vm_iops"]; got != 6400 {
+		t.Errorf("vm_iops = %d, want 6400 uncached for Standard_D4s_v5", got)
+	}
+	if got := f.Metrics["disk_mbps"]; got != 600 {
+		t.Errorf("disk_mbps = %d, want 600 for three P30", got)
+	}
+	if got := f.Metrics["vm_mbps"]; got != 145 {
+		t.Errorf("vm_mbps = %d, want 145 uncached for Standard_D4s_v5", got)
+	}
+	if !strings.Contains(f.Summary, "module.compute.azurerm_linux_virtual_machine.app") {
+		t.Errorf("the finding does not name the VM inside the module: %s", f.Summary)
+	}
+
+	// The control crosses the same boundary the same way and is within its
+	// limits. A graph that reaches across modules must not turn every crossing
+	// into a finding, which is the expensive way to fix this.
+	count := 0
+	for _, got := range all {
+		if got.Rule != "AZ5" {
+			continue
+		}
+		count++
+		if strings.Contains(got.Summary, "archive") {
+			t.Errorf("AZ5 fired on the control VM, which drives everything attached to it: %s", got.Summary)
+		}
+	}
+	if count != 1 {
+		t.Errorf("AZ5 findings = %d, want exactly 1", count)
 	}
 }
 
