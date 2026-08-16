@@ -41,6 +41,15 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 			counted := 0
 			tierSource := ""
 
+			// What kind of number went into the sum, because the sentence at the
+			// end depends on it. A Premium SSD tier is provisioned and billed. A
+			// Standard SSD tier is documented as "up to", which the catalog note
+			// says in as many words. Premium v2 and Ultra state their own figures
+			// and do not price off the tier ladder. Only the first of the three
+			// supports a claim about money.
+			billedTier, upToTier, declared := false, false, false
+			upToNote := ""
+
 			for _, disk := range azUncachedDisks(g, addr, vmType) {
 				tier, known := c.AzureDiskTierFor(disk.accountType, disk.sizeGiB)
 				if !known {
@@ -50,9 +59,10 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 						iops += disk.iops
 						mbps += float64(disk.mbps)
 						counted++
+						declared = true
 						resources = append(resources, disk.addr)
 						detail = append(detail, fmt.Sprintf(
-							"%s (%s, %d GiB) provisions %d IOPS and %d MB/s explicitly.",
+							"%s (%s, %d GiB) states %d IOPS and %d MB/s on the resource.",
 							disk.addr, disk.accountType, disk.sizeGiB, disk.iops, disk.mbps))
 					}
 					continue
@@ -62,6 +72,14 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 				counted++
 				tierSource = tier.Source
 				resources = append(resources, disk.addr)
+				if tier.Kind == "Standard SSD" {
+					upToTier, upToNote = true, tier.Notes
+					detail = append(detail, fmt.Sprintf(
+						"%s is %d GiB of %s, which Azure bills as a %s and serves at up to %d IOPS and %d MB/s.",
+						disk.addr, disk.sizeGiB, tier.Kind, tier.Tier, tier.IOPS, tier.MBps))
+					continue
+				}
+				billedTier = true
 				detail = append(detail, fmt.Sprintf(
 					"%s is %d GiB of %s, which Azure bills and serves as a %s: %d IOPS and %d MB/s.",
 					disk.addr, disk.sizeGiB, tier.Kind, tier.Tier, tier.IOPS, tier.MBps))
@@ -85,9 +103,26 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 					"The size can burst to %d IOPS and %d MB/s for up to 30 minutes at a time, so a benchmark will not show this and a sustained workload will.",
 					size.BurstIOPS, size.BurstMBps))
 			}
-			detail = append(detail,
-				"Catalog note: "+c.AzureStorageNotes(),
-				"Two ways out, and they cost differently: a larger VM size raises the cap, or a smaller disk tier stops paying for performance that cannot arrive. Which one is right depends on whether the capacity or the throughput was the point.")
+			// Only a Premium SSD tier is provisioned and billed. Mixing any other
+			// kind into the sum makes a claim about money unsupportable, so the
+			// finding drops the claim rather than qualifying it into mush.
+			paidFor := billedTier && !upToTier && !declared
+
+			detail = append(detail, "Catalog note: "+c.AzureStorageNotes())
+			if upToTier && upToNote != "" {
+				detail = append(detail, "Standard SSD note: "+upToNote)
+			}
+			if declared {
+				detail = append(detail,
+					"Premium SSD v2 and Ultra state their own IOPS and throughput on the resource and do not price off the tier ladder, so what follows is a ceiling this VM cannot reach, not a bill for performance that never arrives.")
+			}
+			if paidFor {
+				detail = append(detail,
+					"Two ways out, and they cost differently: a larger VM size raises the cap, or a smaller disk tier stops paying for performance that cannot arrive. Which one is right depends on whether the capacity or the throughput was the point.")
+			} else {
+				detail = append(detail,
+					"Two ways out: a larger VM size raises the cap, or a smaller disk stops offering performance that cannot arrive. Which one is right depends on whether the capacity or the throughput was the point.")
+			}
 			if tierSource != "" {
 				// The finding quotes two documents. Source carries the VM one,
 				// so the disk one has to be printed or the reader can only
@@ -97,19 +132,35 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 
 			var problems []string
 			if overIOPS {
-				problems = append(problems, fmt.Sprintf("%d provisioned IOPS against a %d IOPS cap", iops, size.UncachedIOPS))
+				if paidFor {
+					problems = append(problems, fmt.Sprintf("%d provisioned IOPS against a %d IOPS cap", iops, size.UncachedIOPS))
+				} else {
+					problems = append(problems, fmt.Sprintf("%d disk IOPS against a %d IOPS cap", iops, size.UncachedIOPS))
+				}
 			}
 			if overMBps {
-				problems = append(problems, fmt.Sprintf("%.0f MB/s provisioned against a %.0f MB/s cap", mbps, size.UncachedMBps))
+				if paidFor {
+					problems = append(problems, fmt.Sprintf("%.0f MB/s provisioned against a %.0f MB/s cap", mbps, size.UncachedMBps))
+				} else {
+					problems = append(problems, fmt.Sprintf("%.0f MB/s of disk against a %.0f MB/s cap", mbps, size.UncachedMBps))
+				}
+			}
+
+			// One claim always holds: the VM cannot drive it. The second claim,
+			// that it is being paid for, only holds when every disk in the sum
+			// is a provisioned tier.
+			closing := "The disk performance above the VM cap can never be used."
+			if paidFor {
+				closing = "The disk performance above the VM cap is provisioned and billed and can never be used."
 			}
 
 			out = append(out, Finding{
 				Rule:     "AZ5",
 				Severity: SeverityWarning,
-				Title:    "Disk provisions performance the VM is not allowed to drive",
+				Title:    "Disk offers performance the VM is not allowed to drive",
 				Summary: fmt.Sprintf(
-					"%s attaches %s to a %s: %s. The disk performance above the VM cap is provisioned and billed and can never be used.",
-					addr, azPlural(counted, "uncached disk", "uncached disks"), size.Name, join(problems)),
+					"%s attaches %s to a %s: %s. %s",
+					addr, azPlural(counted, "uncached disk", "uncached disks"), size.Name, join(problems), closing),
 				Detail:     detail,
 				Confidence: size.Confidence,
 				Resources:  resources,

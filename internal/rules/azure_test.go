@@ -338,6 +338,53 @@ func TestAzureDiskOutrunsTheVM(t *testing.T) {
 	}
 }
 
+// The finding makes two claims, and only one of them always holds. That the VM
+// cannot drive the disk is arithmetic. That somebody is paying for the excess
+// depends on what kind of disk it is, and the catalog says so in its own notes:
+// Standard SSD figures are documented as "up to", not as provisioned
+// guarantees, and a rule must not present them as a floor.
+func TestAzureStandardSSDIsNotCalledProvisionedAndBilled(t *testing.T) {
+	// A Premium SSD tier is provisioned and billed, and the claim stays.
+	paid := findAzure(analyzeAzure(t, fixtureAzureHybrid), "AZ5", rules.SeverityWarning)
+	if paid == nil {
+		t.Fatal("AZ5 missed a P30 attached to a Standard_B2s")
+	}
+	if !strings.Contains(paid.Summary, "provisioned and billed") {
+		t.Errorf("a Premium SSD tier stopped being called provisioned and billed, which it is: %s", paid.Summary)
+	}
+
+	// The same disk sold as Standard SSD: same ceiling, different claim.
+	f, err := plan.Load(fixtureAzureHybrid)
+	if err != nil {
+		t.Fatalf("load fixture: %v", err)
+	}
+	for _, r := range f.Resources() {
+		if r.Type == "azurerm_managed_disk" {
+			r.Values["storage_account_type"] = "StandardSSD_LRS"
+		}
+	}
+	c, _ := catalog.Load()
+
+	got := findAzure(rules.Run(f, graph.Build(f), c, rules.DefaultOptions()), "AZ5", rules.SeverityWarning)
+	if got == nil {
+		t.Fatal("AZ5 went quiet on Standard SSD: the throughput ceiling is exceeded either way")
+	}
+	if strings.Contains(got.Summary, "provisioned") || strings.Contains(got.Summary, "billed") {
+		t.Errorf("a Standard SSD figure is documented as \"up to\" and was still called provisioned: %s", got.Summary)
+	}
+	if !strings.Contains(got.Summary, "can never be used") {
+		t.Errorf("the ceiling claim was dropped along with the money claim: %s", got.Summary)
+	}
+
+	detail := strings.Join(got.Detail, "\n")
+	if !strings.Contains(detail, "serves at up to") {
+		t.Errorf("the tier line still reads as a guarantee: %s", detail)
+	}
+	if !strings.Contains(detail, "not as provisioned guarantees") {
+		t.Error("the catalog note that says exactly this never reaches the reader")
+	}
+}
+
 // A cached disk counts against a different, larger VM limit that this catalog
 // does not carry, so it must not be measured against the uncached one.
 func TestAzureCachedDiskIsNotCounted(t *testing.T) {
