@@ -21,6 +21,7 @@ import (
 const (
 	fixtureCritical = "../../fixtures/01-ecs-rds/plan.json"    // 3 critical, 2 warning
 	fixtureQuiet    = "../../fixtures/05-cross-repo/plan.json" // 0 critical, 1 warning
+	fixtureAzureModules = "../../fixtures/azure-03-module-boundary/plan.json"
 )
 
 type result struct {
@@ -952,5 +953,50 @@ func TestPoolSizeFlagMovesTheDemand(t *testing.T) {
 	bumped := demand("analyze", "--json", "--pool-size", "50", gcp)
 	if bumped != base {
 		t.Errorf("demand moved from %d to %d, but the plan declares its pool size, so the flag must not apply", base, bumped)
+	}
+}
+
+// The empty report has always ended with "run with --explain to see what was
+// skipped", and the flag did not exist, so anybody who followed the instruction
+// got a parse error and exit 2. It was the only sentence a user reads when the
+// tool finds nothing, and it was false.
+func TestExplainExistsAndSaysWhyARuleStayedQuiet(t *testing.T) {
+	r := exec(t, "analyze", "--no-color", "--explain", fixtureAzureModules)
+	if r.code != exitOK || r.err != nil {
+		t.Fatalf("code = %d, err = %v", r.code, r.err)
+	}
+	if !strings.Contains(r.stderr, "explain: what each rule did with this plan") {
+		t.Fatalf("no explanation on stderr: %q", r.stderr)
+	}
+	// A rule that let a resource go has to say which resource and why.
+	for _, want := range []string{"azurerm_linux_virtual_machine.archive", "within its limits", "AZ6"} {
+		if !strings.Contains(r.stderr, want) {
+			t.Errorf("the explanation is missing %q, stderr was: %s", want, r.stderr)
+		}
+	}
+
+	// The report is the product; the explanation is commentary. It goes to
+	// stderr so a pipeline reading stdout sees the same bytes either way.
+	plain := exec(t, "analyze", "--no-color", fixtureAzureModules)
+	if r.stdout != plain.stdout {
+		t.Error("--explain changed the report on stdout")
+	}
+	if plain.stderr != "" {
+		t.Errorf("stderr is not empty without --explain: %q", plain.stderr)
+	}
+}
+
+// Asking for an explanation must not be able to change an answer, or the
+// explanation is of a different run than the one that was reported.
+func TestExplainNeverChangesTheVerdict(t *testing.T) {
+	for _, fixture := range []string{fixtureCritical, fixtureQuiet, fixtureAzureModules} {
+		with := exec(t, "analyze", "--json", "--explain", fixture)
+		without := exec(t, "analyze", "--json", fixture)
+		if with.stdout != without.stdout {
+			t.Errorf("%s: the findings changed when --explain was passed", fixture)
+		}
+		if with.code != without.code {
+			t.Errorf("%s: exit code %d with --explain, %d without", fixture, with.code, without.code)
+		}
 	}
 }

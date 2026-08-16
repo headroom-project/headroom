@@ -35,9 +35,11 @@ func azAKSSubnetIPs(f *plan.File, g *graph.Graph, c *catalog.Catalog, opt Option
 
 		mode, flat := azNetworkMode(cluster.Values)
 		if mode == "" {
+			opt.Trace.Skip("AZ2", addr, "the plan does not state a network plugin, so how pods get addresses is unknown")
 			continue
 		}
 		if !flat {
+			opt.Trace.Skip("AZ2", addr, mode+" gives pods addresses from a CIDR outside the virtual network, so no subnet is exhausted by them")
 			// Overlay and kubenet hand pods addresses from a CIDR that never
 			// touches the virtual network. There is no subnet to exhaust, and
 			// saying nothing is the correct answer rather than a gap.

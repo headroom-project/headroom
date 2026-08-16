@@ -77,6 +77,10 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 	configPath := fs.String("config", os.Getenv("HEADROOM_CONFIG"), "path to headroom.yaml (default: discovered next to the plan, then in the working directory)")
 	noConfig := fs.Bool("no-config", false, "ignore any headroom.yaml and run the built-in rules at their defaults")
 	noColor := fs.Bool("no-color", false, "never colour the report (also honoured: NO_COLOR)")
+	// The empty report has always told the reader to run this, and until now the
+	// flag did not exist, so following the instruction printed a parse error and
+	// exited 2. Silence is a claim and this is where it gets its evidence.
+	explain := fs.Bool("explain", false, "write to stderr what each rule did with this plan, including what it skipped and why")
 	doUpload := fs.Bool("upload", false, "send the redacted payload to the headroom API after printing the local report")
 	apiKey := fs.String("api-key", "", "API key for --upload, format hr_live_... (env: HEADROOM_API_KEY)")
 	apiURL := fs.String("api-url", upload.DefaultBaseURL, "base URL of the headroom API (env: HEADROOM_API_URL)")
@@ -129,6 +133,13 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 	opt := rules.DefaultOptions()
 	opt.DefaultPoolSize = *poolSize
 	opt.WarnAt = *warnAt
+	// Attached before the rules run and read only afterwards. A rule never sees
+	// its own trace, so asking for an explanation cannot change an answer.
+	var trace *rules.Trace
+	if *explain {
+		trace = rules.NewTrace()
+		opt.Trace = trace
+	}
 
 	if !*noConfig {
 		path := *configPath
@@ -188,6 +199,8 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 	default:
 		report.Text(stdout, findings, planPath, *noColor)
 	}
+
+	report.Explain(stderr, trace, findings)
 
 	// The gate is decided here, on the findings alone, and nothing that happens
 	// on a socket afterwards is allowed to move it.
@@ -355,6 +368,9 @@ flags:
   --no-color      never colour the report. NO_COLOR in the environment does
                   the same, and colour is off automatically when stdout is
                   not a terminal
+  --explain       write to stderr what each rule did with this plan: what it
+                  reported, what it looked at and could not use, and why. An
+                  empty report and an unanchored one look identical without it
 
 exit codes:
   0  ran, and nothing matched --fail-on

@@ -25,8 +25,8 @@ func azureRules(f *plan.File, g *graph.Graph, c *catalog.Catalog, opt Options) [
 	out = append(out, azAKSSubnetIPs(f, g, c, opt)...)
 	out = append(out, azNATSNATPorts(f, g, c, opt)...)
 	out = append(out, azVPNGatewayThroughput(f, g, c)...)
-	out = append(out, azDiskVMAsymmetry(f, g, c)...)
-	out = append(out, azBurstableCPU(f, c)...)
+	out = append(out, azDiskVMAsymmetry(f, g, c, opt)...)
+	out = append(out, azBurstableCPU(f, c, opt)...)
 	return out
 }
 

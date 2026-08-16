@@ -22,7 +22,7 @@ import (
 // different, larger VM limit that this catalog does not carry, and comparing it
 // against the uncached number would be wrong in the customer's favour, which is
 // still wrong.
-func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Finding {
+func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog, opt Options) []Finding {
 	var out []Finding
 
 	for _, vmType := range []string{
@@ -38,6 +38,8 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 
 			size, ok := c.AzureVMSizeOf(sizeName)
 			if !ok {
+				opt.Trace.Skip("AZ5", addr, "the size "+quoteOrNone(sizeName)+
+					" has no encoded ceiling, so there is nothing to compare the disks against")
 				continue
 			}
 
@@ -121,6 +123,8 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 			}
 
 			if counted == 0 {
+				opt.Trace.Skip("AZ5", addr, "no uncached disk could be resolved from this plan: "+
+					"an attachment that could not be followed, a disk declared elsewhere, or every disk cached")
 				continue
 			}
 
@@ -142,6 +146,9 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 			overIOPS := capIOPS > 0 && iops > capIOPS
 			overMBps := capMBps > 0 && mbps > capMBps
 			if !overIOPS && !overMBps {
+				opt.Trace.Skip("AZ5", addr, fmt.Sprintf(
+					"%d uncached disk IOPS and %.0f MB/s against a ceiling of %d and %.0f: within its limits",
+					iops, mbps, capIOPS, capMBps))
 				continue
 			}
 

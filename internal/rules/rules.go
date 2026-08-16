@@ -63,6 +63,11 @@ type Options struct {
 	// Now exists so exception expiry is testable rather than dependent on the
 	// day the suite happens to run.
 	Now time.Time
+
+	// Trace collects the reasons rules had for staying quiet. Nil means nobody
+	// is recording, which is the normal case: the analysis is identical either
+	// way, and a rule never reads from it.
+	Trace *Trace
 }
 
 func DefaultOptions() Options {
@@ -93,7 +98,11 @@ func Run(f *plan.File, g *graph.Graph, c *catalog.Catalog, opt Options) []Findin
 	out = append(out, ruleBurstableCPU(f, c, opt)...)
 	out = append(out, ruleVPNAggregate(f, g, c)...)
 	out = append(out, runCustom(f, opt)...)
-	return sortFindings(dedupe(applyConfig(out, opt)))
+	out = sortFindings(dedupe(applyConfig(out, opt)))
+	// Recorded after the config has had its say, so a rule the organization
+	// turned off is not reported as one that found nothing.
+	opt.Trace.record(out)
+	return out
 }
 
 // workload is a scalable consumer sitting in front of a fixed-capacity provider.
