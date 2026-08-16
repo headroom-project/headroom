@@ -172,6 +172,14 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 			fmt.Fprintln(stderr, "\nwarning: no salt set, so resource ids are a plain hash of a low-entropy address. Set HEADROOM_SALT before uploading anything.")
 		}
 	case *asJSON:
+		// A run that finds nothing emits an empty list, never null. This is the
+		// most common invocation there is, the green pipeline, and `jq length`
+		// over null is an error rather than 0, so the quiet case was the one
+		// that broke. extract.Build already initialises its slices for exactly
+		// this reason; this path did not.
+		if findings == nil {
+			findings = []rules.Finding{}
+		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(findings); err != nil {

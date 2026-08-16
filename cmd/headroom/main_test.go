@@ -225,6 +225,40 @@ func TestJSONOutputIsValidAndCarriesTheNumbers(t *testing.T) {
 	}
 }
 
+// The quiet run is the one a pipeline sees every day, and it was the one that
+// emitted `null`. `jq 'length'` over null is an error, not 0, so the shape of
+// the output changed with the result, which is the one thing a machine readable
+// format must never do.
+func TestJSONOnAPlanWithNoFindingsIsAnEmptyListNotNull(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(empty, []byte(
+		`{"format_version":"1.2","terraform_version":"1.6.5",`+
+			`"planned_values":{"root_module":{"resources":[]}}}`), 0o600); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+
+	r := exec(t, "analyze", "--json", empty)
+	if r.code != exitOK || r.err != nil {
+		t.Fatalf("code = %d, err = %v", r.code, r.err)
+	}
+	if got := strings.TrimSpace(r.stdout); got != "[]" {
+		t.Errorf("stdout = %q, want %q", got, "[]")
+	}
+
+	// The bytes have to survive a decode into a list, because that is what
+	// every consumer downstream actually does with them.
+	var findings []map[string]any
+	if err := json.Unmarshal([]byte(r.stdout), &findings); err != nil {
+		t.Fatalf("--json did not emit valid JSON: %v", err)
+	}
+	if findings == nil {
+		t.Error("decoded to nil: the document said null, not []")
+	}
+	if len(findings) != 0 {
+		t.Errorf("len = %d, want 0", len(findings))
+	}
+}
+
 func TestTextReportNamesThePlanAndCountsTheFindings(t *testing.T) {
 	r := exec(t, "analyze", fixtureCritical)
 	if !strings.Contains(r.stdout, filepath.Base(fixtureCritical)) {
