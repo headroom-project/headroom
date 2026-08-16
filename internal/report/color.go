@@ -5,6 +5,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/headroom-project/headroom/internal/tty"
 )
 
 // Colour in the terminal report.
@@ -108,9 +110,8 @@ func (p palette) tokens(line string) string {
 //  3. FORCE_COLOR, for a pipeline that renders escapes itself
 //  4. stdout is a character device
 //
-// Detection uses os.File.Stat rather than golang.org/x/term on purpose. This
-// module has one dependency and the README makes an argument out of that, so
-// pulling in a package to ask one question would cost more than it returns.
+// Step 4 lives in internal/tty because the update check asks the same question
+// about stderr, and the two must never be able to answer it differently.
 func wantColour(w io.Writer, noColorFlag bool) bool {
 	if noColorFlag {
 		return false
@@ -121,13 +122,5 @@ func wantColour(w io.Writer, noColorFlag bool) bool {
 	if v, set := os.LookupEnv("FORCE_COLOR"); set && v != "0" && !strings.EqualFold(v, "false") {
 		return true
 	}
-	f, ok := w.(*os.File)
-	if !ok {
-		return false
-	}
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return tty.Is(w)
 }
