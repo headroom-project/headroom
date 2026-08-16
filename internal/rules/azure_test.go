@@ -15,6 +15,7 @@ const (
 	fixtureAzureHybrid  = "../../fixtures/azure-02-vm-disk-vpn/plan.json"
 	fixtureAzureModules = "../../fixtures/azure-03-module-boundary/plan.json"
 	fixtureAzureAKSv3   = "../../fixtures/azure-04-aks-provider-v3/plan.json"
+	fixtureAzureLegacy  = "../../fixtures/azure-05-legacy-vm/plan.json"
 )
 
 func analyzeAzure(t *testing.T, path string) []rules.Finding {
@@ -337,6 +338,36 @@ func TestAzureDiskOutrunsTheVM(t *testing.T) {
 	}
 	if got := f.Metrics["vm_iops"]; got != 1280 {
 		t.Errorf("vm_iops = %d, want 1280 uncached for Standard_B2s", got)
+	}
+}
+
+// azurerm_virtual_machine came before the linux/windows split and azurerm 4.0
+// removed it, which does not remove it from anybody's estate. Its disks are
+// declared inside the VM block rather than attached, and they use
+// managed_disk_type where the newer resources say storage_account_type, so a
+// rule that iterates over the two newer type names walks past a VM with two
+// terabytes of Premium SSD hanging off it.
+func TestAzureLegacyVirtualMachineIsAnalysedLikeTheNewerOnes(t *testing.T) {
+	f := findAzure(analyzeAzure(t, fixtureAzureLegacy), "AZ5", rules.SeverityWarning)
+	if f == nil {
+		t.Fatal("AZ5 missed two inline P30 disks on an azurerm_virtual_machine")
+	}
+	if got := f.Metrics["disks_counted"]; got != 2 {
+		t.Errorf("disks_counted = %d, want 2: the os disk is cached and must not be counted", got)
+	}
+	if got := f.Metrics["disk_iops"]; got != 10000 {
+		t.Errorf("disk_iops = %d, want 10000 for two P30", got)
+	}
+	if got := f.Metrics["vm_iops"]; got != 6400 {
+		t.Errorf("vm_iops = %d, want 6400: vm_size is the old spelling of size", got)
+	}
+	if got := f.Metrics["disk_mbps"]; got != 400 {
+		t.Errorf("disk_mbps = %d, want 400 for two P30", got)
+	}
+	// The disks have no address of their own, so the finding has to say where
+	// in the VM they were declared or the reader cannot find them.
+	if !strings.Contains(strings.Join(f.Detail, "\n"), "storage_data_disk db-data") {
+		t.Errorf("the inline disk is not named in the detail: %v", f.Detail)
 	}
 }
 

@@ -25,7 +25,13 @@ import (
 func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Finding {
 	var out []Finding
 
-	for _, vmType := range []string{"azurerm_linux_virtual_machine", "azurerm_windows_virtual_machine"} {
+	for _, vmType := range []string{
+		"azurerm_linux_virtual_machine",
+		"azurerm_windows_virtual_machine",
+		// The pre split resource, removed in azurerm 4.0 and still planned by
+		// every estate pinned to 3.x. Same question, different spelling.
+		"azurerm_virtual_machine",
+	} {
 		for _, vm := range f.ByType(vmType) {
 			addr := plan.Base(vm.Address)
 			sizeName := azVMSizeOf(vm.Values)
@@ -216,6 +222,14 @@ func azUncachedDisks(g *graph.Graph, vm, vmType string) []azDisk {
 		}
 	}
 
+	// The pre split azurerm_virtual_machine declares its disks inside the VM
+	// block, under different names: storage_os_disk and any number of
+	// storage_data_disk, both carrying managed_disk_type where the newer
+	// resources say storage_account_type. None of it is reachable through an
+	// attachment, so a rule that only walks attachments sees a VM with no disks.
+	out = append(out, azInlineDisks(g, vm, "storage_os_disk", "managed_disk_type")...)
+	out = append(out, azInlineDisks(g, vm, "storage_data_disk", "managed_disk_type")...)
+
 	for _, values := range g.Instances(vm) {
 		disks, ok := values["os_disk"].([]any)
 		if !ok {
@@ -236,6 +250,48 @@ func azUncachedDisks(g *graph.Graph, vm, vmType string) []azDisk {
 			out = append(out, azDisk{
 				addr:        vm + " (os_disk)",
 				accountType: plan.Str(osDisk, "storage_account_type"),
+				sizeGiB:     size,
+			})
+		}
+	}
+	return out
+}
+
+// azInlineDisks reads a disk block declared inside the VM resource itself,
+// under whatever names that resource uses for the block and for the account
+// type. Only uncached disks come back, for the same reason as everywhere else
+// in this rule: a cached disk counts against a different VM limit that this
+// catalog does not carry.
+func azInlineDisks(g *graph.Graph, vm, block, typeKey string) []azDisk {
+	var out []azDisk
+
+	for _, values := range g.Instances(vm) {
+		disks, ok := values[block].([]any)
+		if !ok {
+			continue
+		}
+		for _, item := range disks {
+			disk, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if caching := plan.Str(disk, "caching"); caching != "None" {
+				continue
+			}
+			size, ok := plan.Num(disk, "disk_size_gb")
+			if !ok || size == 0 {
+				continue
+			}
+			// The disk has no address of its own: it is part of the VM. Naming
+			// the block and the disk keeps the finding pointing at something the
+			// reader can find in their terraform.
+			addr := vm + " (" + block
+			if name := plan.Str(disk, "name"); name != "" {
+				addr += " " + name
+			}
+			out = append(out, azDisk{
+				addr:        addr + ")",
+				accountType: plan.Str(disk, typeKey),
 				sizeGiB:     size,
 			})
 		}

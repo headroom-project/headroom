@@ -23,6 +23,7 @@ func azBurstableCPU(f *plan.File, c *catalog.Catalog) []Finding {
 	for _, vmType := range []string{
 		"azurerm_linux_virtual_machine",
 		"azurerm_windows_virtual_machine",
+		"azurerm_virtual_machine",
 		"azurerm_linux_virtual_machine_scale_set",
 		"azurerm_windows_virtual_machine_scale_set",
 	} {
