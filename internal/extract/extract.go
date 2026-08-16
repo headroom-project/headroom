@@ -67,6 +67,15 @@ type Node struct {
 	// same resource, and it is what lets the backend stitch plans together.
 	XID   string         `json:"xid,omitempty"`
 	Attrs map[string]any `json:"attrs,omitempty"`
+
+	// InstanceCount is how many resources the block produced. A node is a block,
+	// because that is the unit the reference graph is keyed on, and one block
+	// with for_each over three disks is three disks with three ceilings.
+	// Reporting it as one understated every estate by however much anybody used
+	// for_each, which in real terraform is everywhere. It is not called
+	// "instances" because a scale set already carries an allowlisted attribute
+	// by that name, meaning something else entirely.
+	InstanceCount int `json:"instance_count"`
 }
 
 type Finding struct {
@@ -122,20 +131,28 @@ func (r *Redactor) Build(f *plan.File, g *graph.Graph, findings []rules.Finding,
 	own := ownIDs(f)
 
 	included := map[string]bool{}
+	at := map[string]int{}
 	for _, res := range f.Resources() {
 		keys, ok := allowlist[res.Type]
 		if !ok {
 			continue
 		}
 		addr := plan.Base(res.Address)
-		if included[addr] {
+		if i, seen := at[addr]; seen {
+			// Every instance after the first used to be dropped on the floor,
+			// so three disks of 3,000 IOPS arrived at the backend as one. The
+			// rules never suffered from it because they count instances
+			// themselves; only the uploaded picture of the estate did.
+			p.Nodes[i].InstanceCount++
 			continue
 		}
 		included[addr] = true
+		at[addr] = len(p.Nodes)
 		node := Node{
-			ID:    r.ID(addr),
-			Type:  res.Type,
-			Attrs: pick(res.Values, keys),
+			ID:            r.ID(addr),
+			Type:          res.Type,
+			Attrs:         pick(res.Values, keys),
+			InstanceCount: 1,
 		}
 		if id, exists := own[addr]; exists {
 			node.XID = r.CloudID(id)

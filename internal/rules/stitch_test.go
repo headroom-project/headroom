@@ -132,3 +132,27 @@ func TestCrossRepoPlanStillAnalysesCleanly(t *testing.T) {
 		}
 	}
 }
+
+// A node is a block, and one block with for_each over three disks is three
+// disks with three ceilings. Every instance after the first used to be dropped,
+// so the estate the backend saw was smaller than the estate the customer has by
+// however much they used for_each, which in real terraform is everywhere. The
+// local rules never suffered from this because they count instances themselves,
+// which is exactly why nothing caught it.
+func TestNodesCarryHowManyResourcesTheBlockProduced(t *testing.T) {
+	p := payloadOf(t, fixtureAzureModules, "org-salt")
+
+	disks := 0
+	for _, n := range p.Nodes {
+		if n.InstanceCount < 1 {
+			t.Errorf("node %s of type %s reports %d resources", n.ID, n.Type, n.InstanceCount)
+		}
+		if n.Type == "azurerm_managed_disk" {
+			disks += n.InstanceCount
+		}
+	}
+	// Three from the for_each block plus the single archive disk.
+	if disks != 4 {
+		t.Errorf("managed disks in the payload = %d, want 4: the for_each block produces three", disks)
+	}
+}

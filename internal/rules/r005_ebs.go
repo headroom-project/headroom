@@ -35,6 +35,9 @@ func ruleEBS(f *plan.File, c *catalog.Catalog, opt Options) []Finding {
 			// the cliff is real. A 400 GiB volume earns 1200 baseline IOPS and
 			// still bursts to 3000, a 2.5x fall.
 			if v.size >= gp2.BurstIrrelevantAtGiB || baseline >= gp2.BurstIOPS {
+				opt.Trace.Skip("R5", v.owner, fmt.Sprintf(
+					"%d GiB of gp2 earns %d baseline IOPS, which has caught up with the %d IOPS burst ceiling: there is no cliff left",
+					v.size, baseline, gp2.BurstIOPS))
 				continue
 			}
 			out = append(out, Finding{

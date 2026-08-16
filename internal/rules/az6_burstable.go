@@ -17,12 +17,13 @@ import (
 // the balance reaches zero the machine is throttled to its base percentage and
 // stays there for as long as the load lasts. On Azure the ceiling is latency,
 // and it arrives without a line on the bill to warn anyone.
-func azBurstableCPU(f *plan.File, c *catalog.Catalog) []Finding {
+func azBurstableCPU(f *plan.File, c *catalog.Catalog, opt Options) []Finding {
 	var out []Finding
 
 	for _, vmType := range []string{
 		"azurerm_linux_virtual_machine",
 		"azurerm_windows_virtual_machine",
+		"azurerm_virtual_machine",
 		"azurerm_linux_virtual_machine_scale_set",
 		"azurerm_windows_virtual_machine_scale_set",
 	} {
@@ -30,7 +31,13 @@ func azBurstableCPU(f *plan.File, c *catalog.Catalog) []Finding {
 			addr := plan.Base(vm.Address)
 
 			size, ok := c.AzureVMSizeOf(azVMSizeOf(vm.Values))
-			if !ok || size.BaselinePct == 0 {
+			if !ok {
+				opt.Trace.Skip("AZ6", addr, "the size "+quoteOrNone(azVMSizeOf(vm.Values))+
+					" has no encoded credit model, so whether it throttles is unknown")
+				continue
+			}
+			if size.BaselinePct == 0 {
+				opt.Trace.Skip("AZ6", addr, size.Name+" is not a burstable size, so there is no baseline to fall back to")
 				continue
 			}
 

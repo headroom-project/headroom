@@ -11,8 +11,11 @@ import (
 )
 
 const (
-	fixtureAzureAKS    = "../../fixtures/azure-01-aks-postgres/plan.json"
-	fixtureAzureHybrid = "../../fixtures/azure-02-vm-disk-vpn/plan.json"
+	fixtureAzureAKS     = "../../fixtures/azure-01-aks-postgres/plan.json"
+	fixtureAzureHybrid  = "../../fixtures/azure-02-vm-disk-vpn/plan.json"
+	fixtureAzureModules = "../../fixtures/azure-03-module-boundary/plan.json"
+	fixtureAzureAKSv3   = "../../fixtures/azure-04-aks-provider-v3/plan.json"
+	fixtureAzureLegacy  = "../../fixtures/azure-05-legacy-vm/plan.json"
 )
 
 func analyzeAzure(t *testing.T, path string) []rules.Finding {
@@ -81,6 +84,51 @@ func TestAzureSKUNameParsing(t *testing.T) {
 
 	if _, ok := c.AzurePostgresConnections("GP_Standard_D999ds_v9"); ok {
 		t.Error("an unknown compute size resolved: the catalog must refuse to interpolate")
+	}
+}
+
+// Azure does not distinguish case in a VM size or a gateway sku, so a plan that
+// writes Standard_E32s_V5 is naming a size this catalog already carries. Two
+// lookups in one file used to disagree about that: the disk lookup folded case
+// and the size lookup did not, so a capital letter was enough to make the rule
+// go quiet with the right number sitting in the table.
+func TestAzureSKULookupIgnoresCase(t *testing.T) {
+	c, _ := catalog.Load()
+
+	want, ok := c.AzureVMSizeOf("Standard_E32s_v5")
+	if !ok {
+		t.Fatal("Standard_E32s_v5 left the catalog, so this test proves nothing")
+	}
+
+	// All three spellings appear in real plans.
+	for _, spelling := range []string{"Standard_E32s_V5", "standard_e32s_v5", "STANDARD_E32S_V5"} {
+		got, ok := c.AzureVMSizeOf(spelling)
+		if !ok {
+			t.Errorf("%s: no catalog entry, and Azure accepts this spelling", spelling)
+			continue
+		}
+		if got.UncachedIOPS != want.UncachedIOPS || got.UncachedMBps != want.UncachedMBps {
+			t.Errorf("%s: %d IOPS and %.0f MB/s, want %d and %.0f",
+				spelling, got.UncachedIOPS, got.UncachedMBps, want.UncachedIOPS, want.UncachedMBps)
+		}
+		// The catalog's own spelling comes back, so the finding quotes what the
+		// vendor documentation calls it and not what happened to be typed.
+		if got.Name != want.Name {
+			t.Errorf("%s: name = %q, want the catalog spelling %q", spelling, got.Name, want.Name)
+		}
+	}
+
+	// Folding case must not turn the lookup into a guess: absent stays absent.
+	if _, ok := c.AzureVMSizeOf("Standard_D999s_v9"); ok {
+		t.Error("an unknown size resolved through the case insensitive path")
+	}
+
+	// The gateway table has the same shape and the same exposure, and a module
+	// default of sku = "basic" is a sku the provider accepts.
+	for _, spelling := range []string{"basic", "BASIC", "vpngw1"} {
+		if _, ok := c.AzureVPNGateway(spelling); !ok {
+			t.Errorf("%s: no gateway entry, and the provider accepts this spelling", spelling)
+		}
 	}
 }
 
@@ -290,6 +338,213 @@ func TestAzureDiskOutrunsTheVM(t *testing.T) {
 	}
 	if got := f.Metrics["vm_iops"]; got != 1280 {
 		t.Errorf("vm_iops = %d, want 1280 uncached for Standard_B2s", got)
+	}
+}
+
+// azurerm_virtual_machine came before the linux/windows split and azurerm 4.0
+// removed it, which does not remove it from anybody's estate. Its disks are
+// declared inside the VM block rather than attached, and they use
+// managed_disk_type where the newer resources say storage_account_type, so a
+// rule that iterates over the two newer type names walks past a VM with two
+// terabytes of Premium SSD hanging off it.
+func TestAzureLegacyVirtualMachineIsAnalysedLikeTheNewerOnes(t *testing.T) {
+	f := findAzure(analyzeAzure(t, fixtureAzureLegacy), "AZ5", rules.SeverityWarning)
+	if f == nil {
+		t.Fatal("AZ5 missed two inline P30 disks on an azurerm_virtual_machine")
+	}
+	if got := f.Metrics["disks_counted"]; got != 2 {
+		t.Errorf("disks_counted = %d, want 2: the os disk is cached and must not be counted", got)
+	}
+	if got := f.Metrics["disk_iops"]; got != 10000 {
+		t.Errorf("disk_iops = %d, want 10000 for two P30", got)
+	}
+	if got := f.Metrics["vm_iops"]; got != 6400 {
+		t.Errorf("vm_iops = %d, want 6400: vm_size is the old spelling of size", got)
+	}
+	if got := f.Metrics["disk_mbps"]; got != 400 {
+		t.Errorf("disk_mbps = %d, want 400 for two P30", got)
+	}
+	// The disks have no address of their own, so the finding has to say where
+	// in the VM they were declared or the reader cannot find them.
+	if !strings.Contains(strings.Join(f.Detail, "\n"), "storage_data_disk db-data") {
+		t.Errorf("the inline disk is not named in the detail: %v", f.Detail)
+	}
+}
+
+// azurerm 4.0 renamed enable_auto_scaling to auto_scaling_enabled. The same
+// cluster, planned by either provider, is the same cluster, so it has to be
+// worth the same verdict.
+//
+// Reading only the 4.x name did not make the rule quiet, which would have been
+// survivable. It made the rule wrong and confident: the pool fell through to
+// node_count, the finding said "node_count, no autoscaling" about a pool that
+// autoscales, and the separate pool that declares no node_count at all vanished
+// from the analysis.
+func TestAzureAKSVerdictDoesNotDependOnTheProviderVersion(t *testing.T) {
+	v4 := findAzure(analyzeAzure(t, fixtureAzureAKS), "AZ2", rules.SeverityCritical)
+	if v4 == nil {
+		t.Fatal("AZ2 missed the 4.x plan, so there is nothing to compare against")
+	}
+	v3 := findAzure(analyzeAzure(t, fixtureAzureAKSv3), "AZ2", rules.SeverityCritical)
+	if v3 == nil {
+		t.Fatal("AZ2 went quiet on the 3.x plan of the same cluster")
+	}
+
+	for _, metric := range []string{"demand", "usable"} {
+		if v3.Metrics[metric] != v4.Metrics[metric] {
+			t.Errorf("%s = %d under azurerm 3.x and %d under 4.x, and it is the same cluster",
+				metric, v3.Metrics[metric], v4.Metrics[metric])
+		}
+	}
+	if got := v3.Metrics["demand"]; got != 2220 {
+		t.Errorf("demand = %d, want 2220 (20 nodes x (1 + 110))", got)
+	}
+
+	// The wrong number came with a sentence that stated its cause, which is how
+	// a reader would have been talked out of noticing.
+	said := v3.Summary + "\n" + strings.Join(v3.Detail, "\n")
+	if strings.Contains(said, "no autoscaling") {
+		t.Errorf("the finding calls an autoscaling pool static: %s", said)
+	}
+	if !strings.Contains(said, "apps") {
+		t.Errorf("the separate node pool is absent from the finding: %s", said)
+	}
+}
+
+// The same arithmetic as TestAzureDiskOutrunsTheVM, moved into the arrangement
+// every corporate repository actually uses: the VM in one module, the disks in
+// another, and the attachment in the root reaching both through outputs.
+//
+// Nothing about the capacity question changes when the code is split into
+// files, so nothing about the answer may change either. Until the graph could
+// follow a module output, this plan produced no findings at all, and the report
+// said the infrastructure was quiet rather than saying it could not tell.
+func TestAzureDiskOutrunsTheVMAcrossAModuleBoundary(t *testing.T) {
+	all := analyzeAzure(t, fixtureAzureModules)
+
+	f := findAzure(all, "AZ5", rules.SeverityWarning)
+	if f == nil {
+		t.Fatal("AZ5 missed three P30 disks attached to a Standard_D4s_v5 from a sibling module")
+	}
+	if got := f.Metrics["disks_counted"]; got != 3 {
+		t.Errorf("disks_counted = %d, want 3", got)
+	}
+	if got := f.Metrics["disk_iops"]; got != 15000 {
+		t.Errorf("disk_iops = %d, want 15000 for three P30", got)
+	}
+	if got := f.Metrics["vm_iops"]; got != 6400 {
+		t.Errorf("vm_iops = %d, want 6400 uncached for Standard_D4s_v5", got)
+	}
+	if got := f.Metrics["disk_mbps"]; got != 600 {
+		t.Errorf("disk_mbps = %d, want 600 for three P30", got)
+	}
+	if got := f.Metrics["vm_mbps"]; got != 145 {
+		t.Errorf("vm_mbps = %d, want 145 uncached for Standard_D4s_v5", got)
+	}
+	if !strings.Contains(f.Summary, "module.compute.azurerm_linux_virtual_machine.app") {
+		t.Errorf("the finding does not name the VM inside the module: %s", f.Summary)
+	}
+
+	// The control crosses the same boundary the same way and is within its
+	// limits. A graph that reaches across modules must not turn every crossing
+	// into a finding, which is the expensive way to fix this.
+	count := 0
+	for _, got := range all {
+		if got.Rule != "AZ5" {
+			continue
+		}
+		count++
+		if strings.Contains(got.Summary, "archive") {
+			t.Errorf("AZ5 fired on the control VM, which drives everything attached to it: %s", got.Summary)
+		}
+	}
+	if count != 1 {
+		t.Errorf("AZ5 findings = %d, want exactly 1", count)
+	}
+}
+
+// A Premium SSD v2 disk that states no IOPS is not a disk with no performance:
+// it is a disk running at the free baseline of 3,000 IOPS and 125 MB/s, and
+// terraform makes both attributes optional so stating nothing is the common
+// case. The rule used to add zero for it and then report nothing at all.
+func TestPremiumV2WithoutDeclaredIOPSCountsItsBaseline(t *testing.T) {
+	f, err := plan.Load(fixtureAzureHybrid)
+	if err != nil {
+		t.Fatalf("load fixture: %v", err)
+	}
+	for _, r := range f.Resources() {
+		if r.Type == "azurerm_managed_disk" {
+			r.Values["storage_account_type"] = "PremiumV2_LRS"
+			delete(r.Values, "disk_iops_read_write")
+			delete(r.Values, "disk_mbps_read_write")
+		}
+	}
+	c, _ := catalog.Load()
+
+	got := findAzure(rules.Run(f, graph.Build(f), c, rules.DefaultOptions()), "AZ5", rules.SeverityWarning)
+	if got == nil {
+		t.Fatal("AZ5 went quiet on a Premium SSD v2 disk that states nothing and performs at 3000 IOPS anyway")
+	}
+	if n := got.Metrics["disk_iops"]; n != 3000 {
+		t.Errorf("disk_iops = %d, want the 3000 baseline", n)
+	}
+	if n := got.Metrics["disk_mbps"]; n != 125 {
+		t.Errorf("disk_mbps = %d, want the 125 baseline", n)
+	}
+	said := strings.Join(got.Detail, "\n")
+	if !strings.Contains(said, "free baseline") {
+		t.Errorf("the finding does not say the number came from the baseline rather than the plan: %s", said)
+	}
+	// Free means free: the ceiling is real and the money claim is not.
+	if strings.Contains(got.Summary, "billed") {
+		t.Errorf("a free baseline was called billed: %s", got.Summary)
+	}
+}
+
+// The finding makes two claims, and only one of them always holds. That the VM
+// cannot drive the disk is arithmetic. That somebody is paying for the excess
+// depends on what kind of disk it is, and the catalog says so in its own notes:
+// Standard SSD figures are documented as "up to", not as provisioned
+// guarantees, and a rule must not present them as a floor.
+func TestAzureStandardSSDIsNotCalledProvisionedAndBilled(t *testing.T) {
+	// A Premium SSD tier is provisioned and billed, and the claim stays.
+	paid := findAzure(analyzeAzure(t, fixtureAzureHybrid), "AZ5", rules.SeverityWarning)
+	if paid == nil {
+		t.Fatal("AZ5 missed a P30 attached to a Standard_B2s")
+	}
+	if !strings.Contains(paid.Summary, "provisioned and billed") {
+		t.Errorf("a Premium SSD tier stopped being called provisioned and billed, which it is: %s", paid.Summary)
+	}
+
+	// The same disk sold as Standard SSD: same ceiling, different claim.
+	f, err := plan.Load(fixtureAzureHybrid)
+	if err != nil {
+		t.Fatalf("load fixture: %v", err)
+	}
+	for _, r := range f.Resources() {
+		if r.Type == "azurerm_managed_disk" {
+			r.Values["storage_account_type"] = "StandardSSD_LRS"
+		}
+	}
+	c, _ := catalog.Load()
+
+	got := findAzure(rules.Run(f, graph.Build(f), c, rules.DefaultOptions()), "AZ5", rules.SeverityWarning)
+	if got == nil {
+		t.Fatal("AZ5 went quiet on Standard SSD: the throughput ceiling is exceeded either way")
+	}
+	if strings.Contains(got.Summary, "provisioned") || strings.Contains(got.Summary, "billed") {
+		t.Errorf("a Standard SSD figure is documented as \"up to\" and was still called provisioned: %s", got.Summary)
+	}
+	if !strings.Contains(got.Summary, "can never be used") {
+		t.Errorf("the ceiling claim was dropped along with the money claim: %s", got.Summary)
+	}
+
+	detail := strings.Join(got.Detail, "\n")
+	if !strings.Contains(detail, "serves at up to") {
+		t.Errorf("the tier line still reads as a guarantee: %s", detail)
+	}
+	if !strings.Contains(detail, "not as provisioned guarantees") {
+		t.Error("the catalog note that says exactly this never reaches the reader")
 	}
 }
 

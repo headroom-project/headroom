@@ -3,6 +3,7 @@ package catalog
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -188,6 +189,43 @@ type azDiskCatalog struct {
 	StandardSSDNotes string          `json:"standard_ssd_notes"`
 	PremiumSSD       []AzureDiskTier `json:"premium_ssd"`
 	StandardSSD      []AzureDiskTier `json:"standard_ssd"`
+	PremiumV2        AzurePremiumV2  `json:"premium_ssd_v2"`
+}
+
+// AzurePremiumV2 is what a Premium SSD v2 disk gets without asking. Terraform
+// leaves disk_iops_read_write and disk_mbps_read_write optional and the provider
+// publishes no default, so a plan that omits them describes a disk running at
+// exactly this baseline. Reading the absence as zero is what let a rule walk
+// past terabytes of storage without a word.
+type AzurePremiumV2 struct {
+	Source     string `json:"source"`
+	SourceMBps string `json:"source_throughput"`
+	VerifiedAt string `json:"verified_at"`
+	Confidence string `json:"confidence"`
+	IOPS       int    `json:"baseline_iops"`
+	MBps       int    `json:"baseline_mbps"`
+	Notes      string `json:"notes"`
+}
+
+// AzurePremiumV2Baseline returns the free baseline of a Premium SSD v2 disk.
+// The second return is false when the catalog does not carry it, in which case
+// the caller must stay quiet rather than assume a number.
+func (c *Catalog) AzurePremiumV2Baseline() (AzurePremiumV2, bool) {
+	b := loadAzure().disks.PremiumV2
+	if b.IOPS <= 0 || b.MBps <= 0 || b.Source == "" {
+		return AzurePremiumV2{}, false
+	}
+	return b, true
+}
+
+// AzureIsPremiumV2 reports whether an account type is one of the disk kinds that
+// state their own performance on the resource instead of buying it with size.
+func AzureIsPremiumV2(accountType string) bool {
+	switch strings.ToLower(strings.TrimSpace(accountType)) {
+	case "premiumv2_lrs", "premiumv2_zrs", "ultrassd_lrs":
+		return true
+	}
+	return false
 }
 
 // AzureVMSize carries both ceilings a VM imposes: how much CPU it sustains, and
@@ -204,6 +242,17 @@ type AzureVMSize struct {
 	UncachedMBps float64 `json:"uncached_mbps"`
 	BurstIOPS    int     `json:"burst_iops"`
 	BurstMBps    int     `json:"burst_mbps"`
+
+	// Newer series publish a second uncached pair, higher, that governs Ultra
+	// Disk and Premium SSD v2. Zero means the series page states one pair only,
+	// and that pair governs every disk type it supports. Judging a v2 disk
+	// against the Premium SSD pair on a series that publishes both understates
+	// the ceiling by around a third, and understating a ceiling is how a rule
+	// invents a finding.
+	UncachedV2IOPS int     `json:"uncached_v2_iops"`
+	UncachedV2MBps float64 `json:"uncached_v2_mbps"`
+	BurstV2IOPS    int     `json:"burst_v2_iops"`
+	BurstV2MBps    int     `json:"burst_v2_mbps"`
 
 	Name       string `json:"-"`
 	Source     string `json:"-"`
@@ -234,7 +283,47 @@ type azureTables struct {
 	aks      AzureAKS
 	disks    azDiskCatalog
 	vms      azVMCatalog
-	err      error
+
+	// Lowercased key back to the catalog's own spelling. Azure accepts a VM
+	// size and a gateway sku in any case, so a plan that writes one of them
+	// differently is not writing something unknown.
+	vmByFold  map[string]string
+	vpnByFold map[string]string
+
+	err error
+}
+
+// azFoldIndex builds the case insensitive index for a table.
+//
+// Two entries that differ only in case would make a folded lookup depend on map
+// iteration order, so that is a catalog error rather than a coin toss.
+func azFoldIndex[V any](m map[string]V, file string) (map[string]string, error) {
+	out := make(map[string]string, len(m))
+	for k := range m {
+		fold := strings.ToLower(k)
+		if other, clash := out[fold]; clash {
+			return nil, &azCatalogError{file: file, err: fmt.Errorf(
+				"%q and %q differ only in case, so a lookup cannot resolve either", other, k)}
+		}
+		out[fold] = k
+	}
+	return out, nil
+}
+
+// azCanonical resolves what a plan wrote to the key the catalog holds.
+//
+// Azure does not distinguish case in a VM size or a gateway sku, so neither
+// does this: a plan that writes Standard_E32s_V5 names a size the portal
+// accepts and the catalog already carries, and refusing it means the rule goes
+// quiet over a spelling. The catalog's own key comes back, so a finding quotes
+// the spelling the vendor documentation uses rather than the one that happened
+// to be typed.
+func azCanonical[V any](name string, table map[string]V, fold map[string]string) (string, bool) {
+	if _, ok := table[name]; ok {
+		return name, true
+	}
+	canonical, ok := fold[strings.ToLower(name)]
+	return canonical, ok
 }
 
 var (
@@ -264,6 +353,16 @@ func loadAzure() *azureTables {
 				t.err = &azCatalogError{file: step.name, err: err}
 				return
 			}
+		}
+
+		var err error
+		if t.vmByFold, err = azFoldIndex(t.vms.Sizes, "azure-vm.json"); err != nil {
+			t.err = err
+			return
+		}
+		if t.vpnByFold, err = azFoldIndex(t.network.VPN.SKUs, "azure-network.json"); err != nil {
+			t.err = err
+			return
 		}
 	})
 	return &azLoaded
@@ -351,11 +450,12 @@ func (c *Catalog) AzureAKS() AzureAKS { return loadAzure().aks }
 // generation.
 func (c *Catalog) AzureVPNGateway(sku string) (AzureVPNSKU, bool) {
 	t := loadAzure().network.VPN
-	entry, ok := t.SKUs[strings.TrimSpace(sku)]
+	name, ok := azCanonical(strings.TrimSpace(sku), t.SKUs, loadAzure().vpnByFold)
 	if !ok {
 		return AzureVPNSKU{}, false
 	}
-	entry.Name = strings.TrimSpace(sku)
+	entry := t.SKUs[name]
+	entry.Name = name
 	entry.Source, entry.VerifiedAt = t.Source, t.VerifiedAt
 	entry.Confidence, entry.Notes, entry.SKUNotes = t.Confidence, t.Notes, t.SKUNotes
 	return entry, true
@@ -462,11 +562,12 @@ func (c *Catalog) AzureDiskBurstNotes() string { return loadAzure().disks.BurstN
 // table is deliberately partial, so an unknown size means the rule stays quiet.
 func (c *Catalog) AzureVMSizeOf(size string) (AzureVMSize, bool) {
 	t := loadAzure().vms
-	entry, ok := t.Sizes[strings.TrimSpace(size)]
+	name, ok := azCanonical(strings.TrimSpace(size), t.Sizes, loadAzure().vmByFold)
 	if !ok {
 		return AzureVMSize{}, false
 	}
-	entry.Name = strings.TrimSpace(size)
+	entry := t.Sizes[name]
+	entry.Name = name
 	if series, known := t.Series[entry.Series]; known {
 		entry.Source, entry.VerifiedAt = series.Source, series.VerifiedAt
 		entry.Confidence, entry.SeriesNote = series.Confidence, series.Notes

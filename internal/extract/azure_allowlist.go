@@ -37,6 +37,9 @@ var azureAllowlist = map[string][]string{
 	"azurerm_mssql_database":                           {"sku_name", "max_size_gb", "read_scale", "zone_redundant"},
 
 	// Compute and the scale declarations attached to it.
+	// The pre split resource, which azurerm 4.0 removed and estates did not.
+	// Its size attribute has the older name.
+	"azurerm_virtual_machine":                        {"vm_size"},
 	"azurerm_linux_virtual_machine":                  {"size"},
 	"azurerm_windows_virtual_machine":                {"size"},
 	"azurerm_linux_virtual_machine_scale_set":        {"sku", "instances"},

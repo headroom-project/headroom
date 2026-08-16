@@ -23,6 +23,8 @@ func ruleBurstableCPU(f *plan.File, c *catalog.Catalog, opt Options) []Finding {
 
 		b, defaultMode, ok := c.Burstable(itype)
 		if !ok {
+			opt.Trace.Skip("R7", addr, "the instance type "+quoteOrNone(itype)+
+				" is not burstable, or has no encoded credit model")
 			continue
 		}
 
