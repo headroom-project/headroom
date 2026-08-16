@@ -54,22 +54,47 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 			// and do not price off the tier ladder. Only the first of the three
 			// supports a claim about money.
 			billedTier, upToTier, declared := false, false, false
-			upToNote := ""
+			upToNote, baselineNote := "", ""
+
+			// Whether any Premium SSD v2 or Ultra disk is in the sum, because
+			// newer sizes publish a separate and higher ceiling for those.
+			v2Present := false
 
 			for _, disk := range azUncachedDisks(g, addr, vmType) {
 				tier, known := c.AzureDiskTierFor(disk.accountType, disk.sizeGiB)
 				if !known {
-					if disk.iops > 0 {
-						// Premium SSD v2 and Ultra carry their own numbers on
-						// the resource, so there is nothing to look up.
-						iops += disk.iops
-						mbps += float64(disk.mbps)
+					// Premium SSD v2 and Ultra carry their own numbers on the
+					// resource, so there is nothing to look up. What is left
+					// unstated is not nothing: every Premium SSD v2 disk gets a
+					// free baseline whether or not the terraform mentions it,
+					// and reading the silence as zero is what made this rule walk
+					// past terabytes of storage.
+					diskIOPS, diskMBps, fromBaseline := disk.iops, disk.mbps, false
+					if base, ok := c.AzurePremiumV2Baseline(); ok && catalog.AzureIsPremiumV2(disk.accountType) {
+						if diskIOPS == 0 {
+							diskIOPS, fromBaseline = base.IOPS, true
+						}
+						if diskMBps == 0 {
+							diskMBps, fromBaseline = base.MBps, true
+						}
+						baselineNote = base.Notes
+					}
+					if diskIOPS > 0 || diskMBps > 0 {
+						iops += diskIOPS
+						mbps += float64(diskMBps)
 						counted++
 						declared = true
+						if catalog.AzureIsPremiumV2(disk.accountType) {
+							v2Present = true
+						}
 						resources = append(resources, disk.addr)
+						how := "states %d IOPS and %d MB/s on the resource"
+						if fromBaseline {
+							how = "runs at the free baseline of %d IOPS and %d MB/s, which the plan never states because it never has to"
+						}
 						detail = append(detail, fmt.Sprintf(
-							"%s (%s, %d GiB) states %d IOPS and %d MB/s on the resource.",
-							disk.addr, disk.accountType, disk.sizeGiB, disk.iops, disk.mbps))
+							"%s (%s, %d GiB) "+how+".",
+							disk.addr, disk.accountType, disk.sizeGiB, diskIOPS, diskMBps))
 					}
 					continue
 				}
@@ -95,19 +120,34 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 				continue
 			}
 
-			overIOPS := size.UncachedIOPS > 0 && iops > size.UncachedIOPS
-			overMBps := size.UncachedMBps > 0 && mbps > size.UncachedMBps
+			// Which ceiling the size imposes depends on what is attached to it.
+			// A series that publishes a second uncached pair for Ultra Disk and
+			// Premium SSD v2 drives those disks harder, by around a third, and
+			// measuring them against the Premium SSD pair would manufacture a
+			// finding out of a column heading. A series that publishes one pair
+			// governs every disk type with it, so nothing changes there.
+			capIOPS, capMBps := size.UncachedIOPS, size.UncachedMBps
+			burstIOPS, burstMBps := size.BurstIOPS, size.BurstMBps
+			capKind := ""
+			if v2Present && size.UncachedV2IOPS > 0 {
+				capIOPS, capMBps = size.UncachedV2IOPS, size.UncachedV2MBps
+				burstIOPS, burstMBps = size.BurstV2IOPS, size.BurstV2MBps
+				capKind = " for Ultra Disk and Premium SSD v2, which this size drives harder than Premium SSD"
+			}
+
+			overIOPS := capIOPS > 0 && iops > capIOPS
+			overMBps := capMBps > 0 && mbps > capMBps
 			if !overIOPS && !overMBps {
 				continue
 			}
 
 			detail = append(detail, fmt.Sprintf(
-				"%s is a %s, which drives at most %d uncached IOPS and %.0f MB/s across every uncached disk attached to it.",
-				addr, size.Name, size.UncachedIOPS, size.UncachedMBps))
-			if size.BurstIOPS > size.UncachedIOPS {
+				"%s is a %s, which drives at most %d uncached IOPS and %.0f MB/s%s across every uncached disk attached to it.",
+				addr, size.Name, capIOPS, capMBps, capKind))
+			if burstIOPS > capIOPS {
 				detail = append(detail, fmt.Sprintf(
 					"The size can burst to %d IOPS and %d MB/s for up to 30 minutes at a time, so a benchmark will not show this and a sustained workload will.",
-					size.BurstIOPS, size.BurstMBps))
+					burstIOPS, burstMBps))
 			}
 			// Only a Premium SSD tier is provisioned and billed. Mixing any other
 			// kind into the sum makes a claim about money unsupportable, so the
@@ -121,6 +161,9 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 			if declared {
 				detail = append(detail,
 					"Premium SSD v2 and Ultra state their own IOPS and throughput on the resource and do not price off the tier ladder, so what follows is a ceiling this VM cannot reach, not a bill for performance that never arrives.")
+			}
+			if baselineNote != "" {
+				detail = append(detail, "Premium SSD v2 baseline: "+baselineNote)
 			}
 			if paidFor {
 				detail = append(detail,
@@ -139,16 +182,16 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 			var problems []string
 			if overIOPS {
 				if paidFor {
-					problems = append(problems, fmt.Sprintf("%d provisioned IOPS against a %d IOPS cap", iops, size.UncachedIOPS))
+					problems = append(problems, fmt.Sprintf("%d provisioned IOPS against a %d IOPS cap", iops, capIOPS))
 				} else {
-					problems = append(problems, fmt.Sprintf("%d disk IOPS against a %d IOPS cap", iops, size.UncachedIOPS))
+					problems = append(problems, fmt.Sprintf("%d disk IOPS against a %d IOPS cap", iops, capIOPS))
 				}
 			}
 			if overMBps {
 				if paidFor {
-					problems = append(problems, fmt.Sprintf("%.0f MB/s provisioned against a %.0f MB/s cap", mbps, size.UncachedMBps))
+					problems = append(problems, fmt.Sprintf("%.0f MB/s provisioned against a %.0f MB/s cap", mbps, capMBps))
 				} else {
-					problems = append(problems, fmt.Sprintf("%.0f MB/s of disk against a %.0f MB/s cap", mbps, size.UncachedMBps))
+					problems = append(problems, fmt.Sprintf("%.0f MB/s of disk against a %.0f MB/s cap", mbps, capMBps))
 				}
 			}
 
@@ -173,9 +216,9 @@ func azDiskVMAsymmetry(f *plan.File, g *graph.Graph, c *catalog.Catalog) []Findi
 				Source:     size.Source,
 				Metrics: map[string]int{
 					"disk_iops":     iops,
-					"vm_iops":       size.UncachedIOPS,
+					"vm_iops":       capIOPS,
 					"disk_mbps":     azRound(mbps),
-					"vm_mbps":       azRound(size.UncachedMBps),
+					"vm_mbps":       azRound(capMBps),
 					"disks_counted": counted,
 				},
 			})

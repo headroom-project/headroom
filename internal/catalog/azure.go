@@ -189,6 +189,43 @@ type azDiskCatalog struct {
 	StandardSSDNotes string          `json:"standard_ssd_notes"`
 	PremiumSSD       []AzureDiskTier `json:"premium_ssd"`
 	StandardSSD      []AzureDiskTier `json:"standard_ssd"`
+	PremiumV2        AzurePremiumV2  `json:"premium_ssd_v2"`
+}
+
+// AzurePremiumV2 is what a Premium SSD v2 disk gets without asking. Terraform
+// leaves disk_iops_read_write and disk_mbps_read_write optional and the provider
+// publishes no default, so a plan that omits them describes a disk running at
+// exactly this baseline. Reading the absence as zero is what let a rule walk
+// past terabytes of storage without a word.
+type AzurePremiumV2 struct {
+	Source     string `json:"source"`
+	SourceMBps string `json:"source_throughput"`
+	VerifiedAt string `json:"verified_at"`
+	Confidence string `json:"confidence"`
+	IOPS       int    `json:"baseline_iops"`
+	MBps       int    `json:"baseline_mbps"`
+	Notes      string `json:"notes"`
+}
+
+// AzurePremiumV2Baseline returns the free baseline of a Premium SSD v2 disk.
+// The second return is false when the catalog does not carry it, in which case
+// the caller must stay quiet rather than assume a number.
+func (c *Catalog) AzurePremiumV2Baseline() (AzurePremiumV2, bool) {
+	b := loadAzure().disks.PremiumV2
+	if b.IOPS <= 0 || b.MBps <= 0 || b.Source == "" {
+		return AzurePremiumV2{}, false
+	}
+	return b, true
+}
+
+// AzureIsPremiumV2 reports whether an account type is one of the disk kinds that
+// state their own performance on the resource instead of buying it with size.
+func AzureIsPremiumV2(accountType string) bool {
+	switch strings.ToLower(strings.TrimSpace(accountType)) {
+	case "premiumv2_lrs", "premiumv2_zrs", "ultrassd_lrs":
+		return true
+	}
+	return false
 }
 
 // AzureVMSize carries both ceilings a VM imposes: how much CPU it sustains, and
@@ -205,6 +242,17 @@ type AzureVMSize struct {
 	UncachedMBps float64 `json:"uncached_mbps"`
 	BurstIOPS    int     `json:"burst_iops"`
 	BurstMBps    int     `json:"burst_mbps"`
+
+	// Newer series publish a second uncached pair, higher, that governs Ultra
+	// Disk and Premium SSD v2. Zero means the series page states one pair only,
+	// and that pair governs every disk type it supports. Judging a v2 disk
+	// against the Premium SSD pair on a series that publishes both understates
+	// the ceiling by around a third, and understating a ceiling is how a rule
+	// invents a finding.
+	UncachedV2IOPS int     `json:"uncached_v2_iops"`
+	UncachedV2MBps float64 `json:"uncached_v2_mbps"`
+	BurstV2IOPS    int     `json:"burst_v2_iops"`
+	BurstV2MBps    int     `json:"burst_v2_mbps"`
 
 	Name       string `json:"-"`
 	Source     string `json:"-"`

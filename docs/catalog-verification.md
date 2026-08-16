@@ -271,3 +271,81 @@ wrong ceiling in the AWS catalog was invisible to the suite.
 5. **No fixture covers GCP Private NAT**, which is why that entry sat at `medium`
    for a reason unrelated to its sourcing. The numbers are now confirmed `high`;
    the coverage gap remains.
+
+## Second pass, 2026-08-16: six Azure VM series and the Premium SSD v2 baseline
+
+Driven by a run against real production plans, where eight of eleven stacks with
+material produced nothing because the size was not in the table. Absence is a
+silent failure here: the rule stays quiet and the report reads clean.
+
+Every figure below comes from the Remote storage tab of the series page, columns
+`Uncached Premium SSD IOPS` and `Uncached Premium SSD Throughput`, plus the
+matching burst pair. Each was read twice, once by the researcher and once
+independently against the vendor page before the entry was accepted; 42 of the
+61 new sizes were checked line by line that way and none diverged.
+
+| Series | Sizes | Source |
+|---|---|---|
+| Esv6 | 11 | `sizes/memory-optimized/esv6-series` |
+| Esv4 | 9 | `sizes/memory-optimized/esv4-series` |
+| Easv5 | 10 | `sizes/memory-optimized/easv5-series` |
+| FXmdsv2 | 10 | `sizes/compute-optimized/fxmdsv2-series` |
+| FXmsv2 | 10 | `sizes/compute-optimized/fxmsv2-series` |
+| Basv2 | 11 | `sizes/general-purpose/basv2-series` |
+
+### Three traps this pass had to avoid
+
+**The Local storage tab is not the ceiling.** FXmdsv2 publishes 150,000 IOPS for
+`Standard_FX8mds_v2` under Local storage, which is ephemeral NVMe. The figure a
+managed disk lives under is 33,000. Reading the wrong tab overstates by 4.5x.
+
+**The AMD burstable is not the Intel one.** Every Basv2 size from 2 to 16 vCPUs
+matches its Bsv2 counterpart exactly, and the two 32 vCPU sizes do not:
+`Standard_B32as_v2` stops at 25,600 uncached IOPS where `Standard_B32s_v2`
+reaches 51,200. Copying the series would have doubled a ceiling, which is the
+MariaDB mistake in a different accent.
+
+**Same IOPS, different throughput, across generations.** Esv4 and Easv5 carry the
+same uncached IOPS as Esv5 at each vCPU count and lower throughput:
+`Standard_E8s_v4` drives 192 MB/s and `Standard_E8as_v5` drives 200, against 290
+for `Standard_E8s_v5`. Interpolating from the v5 row would have overstated the
+ceiling on the two series a real estate actually runs.
+
+### A field that changes meaning, and why it was added rather than reused
+
+Esv6, FXmdsv2 and FXmsv2 publish two uncached pairs on the same table, one for
+Premium SSD and one for `Uncached Ultra Disk and Premium SSD v2`. The difference
+is around a third: `Standard_E16s_v6` is 25,600 IOPS for Premium SSD and 33,333
+for a v2 disk.
+
+`uncached_iops` already meant Premium SSD, because the four series encoded first
+publish nothing else. Changing what it means would have silently reinterpreted
+every existing entry, so the second pair is carried separately in
+`uncached_v2_iops` and `uncached_v2_mbps`, absent where the vendor publishes one
+pair only. A series with one pair governs every disk type with it, so nothing
+changes there. Judging a v2 disk against the Premium SSD pair on a size that
+publishes both understates the ceiling, and understating a ceiling is how a rule
+invents a finding.
+
+### Premium SSD v2 baseline: 3,000 IOPS and 125 MB/s, free, and size independent
+
+Sources: `disks-types#premium-ssd-v2-iops` and
+`disks-types#premium-ssd-v2-throughput`. The load bearing word is `All`:
+"All Premium SSD v2 disks have a baseline IOPS of 3,000 that is free of charge",
+and the same sentence for 125 MB/s. A 1 GiB disk gets the same baseline as a 64
+TiB one. Both are also the minimum settable values.
+
+This matters because terraform makes `disk_iops_read_write` and
+`disk_mbps_read_write` optional and the provider publishes no default, so a disk
+that states neither is a disk running at exactly this baseline. AZ5 read the
+silence as zero and skipped the disk entirely. In one real plan that was three
+disks and 9,000 IOPS of storage the rule never saw.
+
+The derived half of that sentence, that an omitted attribute means the baseline,
+is not written on any single vendor page: it joins Microsoft's statement about
+the baseline to the provider's schema. It is recorded here rather than dressed up
+as a quotation.
+
+What is deliberately still absent: the constrained core FX sizes, which appear in
+no table, and the `Initial Credits` column of Basv2, which has no field in the
+catalog to land in.

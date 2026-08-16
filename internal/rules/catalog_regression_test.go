@@ -152,3 +152,85 @@ func TestAzureVPNGatewayResolvesGeneration(t *testing.T) {
 		t.Errorf("VpnGw1 = %d Mbps, want 650", only.ThroughputMbps)
 	}
 }
+
+// The Azure VM table went from four series to ten on 2026-08-16, and eight of
+// eleven real stacks in a customer estate had been false negatives purely
+// because their size was absent. Absence is a silent failure mode here: the
+// rule stays quiet and the report looks clean, so a size disappearing from the
+// table can only be caught by counting.
+func TestAzureVMTableKeepsItsCoverage(t *testing.T) {
+	c := mustCatalog(t)
+
+	// One representative per encoded series, with the uncached pair each one
+	// was verified against.
+	for _, tc := range []struct {
+		size       string
+		iops       int
+		mbps       float64
+		v2IOPS     int
+		v2MBps     float64
+		wantSeries string
+	}{
+		{"Standard_B2s", 1280, 15, 0, 0, "Bv1"},
+		{"Standard_B4s_v2", 6400, 145, 0, 0, "Bsv2"},
+		{"Standard_B4as_v2", 6400, 145, 0, 0, "Basv2"},
+		{"Standard_D4s_v5", 6400, 145, 0, 0, "Dsv5"},
+		{"Standard_E8s_v4", 12800, 192, 0, 0, "Esv4"},
+		{"Standard_E8s_v5", 12800, 290, 0, 0, "Esv5"},
+		{"Standard_E8as_v5", 12800, 200, 0, 0, "Easv5"},
+		{"Standard_E16s_v6", 25600, 848, 33333, 992, "Esv6"},
+		{"Standard_FX8mds_v2", 33000, 1091, 44200, 1200, "FXmdsv2"},
+		{"Standard_FX8ms_v2", 33000, 1091, 44200, 1200, "FXmsv2"},
+	} {
+		size, ok := c.AzureVMSizeOf(tc.size)
+		if !ok {
+			t.Errorf("%s left the catalog", tc.size)
+			continue
+		}
+		if size.Series != tc.wantSeries {
+			t.Errorf("%s: series = %q, want %q", tc.size, size.Series, tc.wantSeries)
+		}
+		if size.UncachedIOPS != tc.iops || size.UncachedMBps != tc.mbps {
+			t.Errorf("%s: uncached = %d IOPS and %.0f MB/s, want %d and %.0f",
+				tc.size, size.UncachedIOPS, size.UncachedMBps, tc.iops, tc.mbps)
+		}
+		// The second pair governs Ultra Disk and Premium SSD v2 and only exists
+		// where the series page publishes it. Inventing one would overstate a
+		// ceiling; losing one understates it, which manufactures findings.
+		if size.UncachedV2IOPS != tc.v2IOPS || size.UncachedV2MBps != tc.v2MBps {
+			t.Errorf("%s: v2 uncached = %d IOPS and %.0f MB/s, want %d and %.0f",
+				tc.size, size.UncachedV2IOPS, size.UncachedV2MBps, tc.v2IOPS, tc.v2MBps)
+		}
+		if size.Source == "" || size.VerifiedAt == "" || size.Confidence == "" {
+			t.Errorf("%s: entry without source, verified_at or confidence", tc.size)
+		}
+	}
+
+	// The trap that made this series worth encoding by hand: the AMD burstable
+	// is not the Intel one at 32 vCPUs, and every size below that matches.
+	amd, _ := c.AzureVMSizeOf("Standard_B32as_v2")
+	intel, _ := c.AzureVMSizeOf("Standard_B32s_v2")
+	if amd.UncachedIOPS != 25600 || intel.UncachedIOPS != 51200 {
+		t.Errorf("B32as_v2 = %d IOPS and B32s_v2 = %d, want 25600 and 51200: copying one series onto the other doubles a ceiling",
+			amd.UncachedIOPS, intel.UncachedIOPS)
+	}
+}
+
+// Every Premium SSD v2 disk gets 3,000 IOPS and 125 MB/s free, and terraform
+// leaves both attributes optional, so the common case is a disk that states
+// nothing and performs anyway. Reading that as zero is how a rule walks past
+// terabytes of storage.
+func TestPremiumV2BaselineIsEncodedAndSourced(t *testing.T) {
+	c := mustCatalog(t)
+
+	base, ok := c.AzurePremiumV2Baseline()
+	if !ok {
+		t.Fatal("no Premium SSD v2 baseline in the catalog")
+	}
+	if base.IOPS != 3000 || base.MBps != 125 {
+		t.Errorf("baseline = %d IOPS and %d MB/s, want 3000 and 125", base.IOPS, base.MBps)
+	}
+	if base.Source == "" || base.VerifiedAt == "" {
+		t.Error("the baseline carries no source: every grounded number must name the page it came from")
+	}
+}

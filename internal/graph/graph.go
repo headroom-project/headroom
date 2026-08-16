@@ -33,6 +33,12 @@ type Graph struct {
 	// is a walk and not a lookup.
 	outputs map[string][]string
 
+	// Every output a module call declares, keyed by the call. When a module is
+	// indexed dynamically, terraform records the reference as the bare call
+	// ("module.sql_vms") and the output name never appears, so the only way back
+	// to a resource is through all of them.
+	moduleOuts map[string][]string
+
 	// What a resource iterates over, per resource. A block that says each.value
 	// is naming an element of this collection, and without it the reference is
 	// unresolvable at the block level even though the plan states it plainly.
@@ -41,14 +47,15 @@ type Graph struct {
 
 func Build(f *plan.File) *Graph {
 	g := &Graph{
-		refs:      map[string]map[string]bool{},
-		revRefs:   map[string]map[string]bool{},
-		types:     map[string]string{},
-		values:    map[string]map[string]any{},
-		exprs:     map[string]map[string]any{},
-		instances: map[string][]map[string]any{},
-		outputs:   map[string][]string{},
-		iter:      map[string][]string{},
+		refs:       map[string]map[string]bool{},
+		revRefs:    map[string]map[string]bool{},
+		types:      map[string]string{},
+		values:     map[string]map[string]any{},
+		exprs:      map[string]map[string]any{},
+		instances:  map[string][]map[string]any{},
+		outputs:    map[string][]string{},
+		iter:       map[string][]string{},
+		moduleOuts: map[string][]string{},
 	}
 
 	for _, r := range f.Resources() {
@@ -63,6 +70,8 @@ func Build(f *plan.File) *Graph {
 	// Outputs are indexed before any edge is drawn, because an edge that lands
 	// on one has to be expanded on the spot.
 	for _, o := range f.ConfigOutputs() {
+		call := strings.TrimSuffix(o.ModulePrefix, ".")
+		g.moduleOuts[call] = append(g.moduleOuts[call], o.Address)
 		for _, ref := range o.References {
 			to := normalize(ref, o.ModulePrefix)
 			if to == "" || to == o.Address {
@@ -119,6 +128,18 @@ func (g *Graph) behind(addr string) []string {
 func (g *Graph) resolveOutput(addr string, seen map[string]bool) []string {
 	targets, isOutput := g.outputs[addr]
 	if !isOutput {
+		// A module indexed dynamically, module.vms[each.value.name].id, is
+		// recorded by terraform as a reference to the bare call: the output name
+		// is not in the plan at all. Every output of that call is therefore a
+		// candidate, and the caller narrows them down by type.
+		if outs, isCall := g.moduleOuts[addr]; isCall && !seen[addr] {
+			seen[addr] = true
+			var out []string
+			for _, o := range outs {
+				out = append(out, g.resolveOutput(o, seen)...)
+			}
+			return out
+		}
 		return []string{addr}
 	}
 	// An output cannot reach itself, but a plan is input this tool did not
@@ -200,8 +221,27 @@ func (g *Graph) ReferencesIn(addr, t string, blocks ...string) []string {
 				candidates = g.iter[base]
 			}
 			for _, candidate := range candidates {
+				var matches []string
+				found := map[string]bool{}
 				for _, to := range g.behind(candidate) {
-					if to == "" || to == base || seen[to] || g.types[to] != t {
+					if to == "" || to == base || g.types[to] != t || found[to] {
+						continue
+					}
+					// Deduplicated before it is counted, because a module that
+					// exports the same resource through two outputs, an id and a
+					// name, is one resource and not an ambiguity.
+					found[to] = true
+					matches = append(matches, to)
+				}
+				// A bare module call was expanded through every output it
+				// declares, so more than one match of the asked for type means
+				// the plan does not say which one was meant. Refusing to choose
+				// is the whole difference between an edge and a guess.
+				if _, isCall := g.moduleOuts[candidate]; isCall && len(matches) > 1 {
+					continue
+				}
+				for _, to := range matches {
+					if seen[to] {
 						continue
 					}
 					seen[to] = true

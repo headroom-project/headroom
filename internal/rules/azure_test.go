@@ -463,6 +463,44 @@ func TestAzureDiskOutrunsTheVMAcrossAModuleBoundary(t *testing.T) {
 	}
 }
 
+// A Premium SSD v2 disk that states no IOPS is not a disk with no performance:
+// it is a disk running at the free baseline of 3,000 IOPS and 125 MB/s, and
+// terraform makes both attributes optional so stating nothing is the common
+// case. The rule used to add zero for it and then report nothing at all.
+func TestPremiumV2WithoutDeclaredIOPSCountsItsBaseline(t *testing.T) {
+	f, err := plan.Load(fixtureAzureHybrid)
+	if err != nil {
+		t.Fatalf("load fixture: %v", err)
+	}
+	for _, r := range f.Resources() {
+		if r.Type == "azurerm_managed_disk" {
+			r.Values["storage_account_type"] = "PremiumV2_LRS"
+			delete(r.Values, "disk_iops_read_write")
+			delete(r.Values, "disk_mbps_read_write")
+		}
+	}
+	c, _ := catalog.Load()
+
+	got := findAzure(rules.Run(f, graph.Build(f), c, rules.DefaultOptions()), "AZ5", rules.SeverityWarning)
+	if got == nil {
+		t.Fatal("AZ5 went quiet on a Premium SSD v2 disk that states nothing and performs at 3000 IOPS anyway")
+	}
+	if n := got.Metrics["disk_iops"]; n != 3000 {
+		t.Errorf("disk_iops = %d, want the 3000 baseline", n)
+	}
+	if n := got.Metrics["disk_mbps"]; n != 125 {
+		t.Errorf("disk_mbps = %d, want the 125 baseline", n)
+	}
+	said := strings.Join(got.Detail, "\n")
+	if !strings.Contains(said, "free baseline") {
+		t.Errorf("the finding does not say the number came from the baseline rather than the plan: %s", said)
+	}
+	// Free means free: the ceiling is real and the money claim is not.
+	if strings.Contains(got.Summary, "billed") {
+		t.Errorf("a free baseline was called billed: %s", got.Summary)
+	}
+}
+
 // The finding makes two claims, and only one of them always holds. That the VM
 // cannot drive the disk is arithmetic. That somebody is paying for the excess
 // depends on what kind of disk it is, and the catalog says so in its own notes:
