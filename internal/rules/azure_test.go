@@ -84,6 +84,51 @@ func TestAzureSKUNameParsing(t *testing.T) {
 	}
 }
 
+// Azure does not distinguish case in a VM size or a gateway sku, so a plan that
+// writes Standard_E32s_V5 is naming a size this catalog already carries. Two
+// lookups in one file used to disagree about that: the disk lookup folded case
+// and the size lookup did not, so a capital letter was enough to make the rule
+// go quiet with the right number sitting in the table.
+func TestAzureSKULookupIgnoresCase(t *testing.T) {
+	c, _ := catalog.Load()
+
+	want, ok := c.AzureVMSizeOf("Standard_E32s_v5")
+	if !ok {
+		t.Fatal("Standard_E32s_v5 left the catalog, so this test proves nothing")
+	}
+
+	// All three spellings appear in real plans.
+	for _, spelling := range []string{"Standard_E32s_V5", "standard_e32s_v5", "STANDARD_E32S_V5"} {
+		got, ok := c.AzureVMSizeOf(spelling)
+		if !ok {
+			t.Errorf("%s: no catalog entry, and Azure accepts this spelling", spelling)
+			continue
+		}
+		if got.UncachedIOPS != want.UncachedIOPS || got.UncachedMBps != want.UncachedMBps {
+			t.Errorf("%s: %d IOPS and %.0f MB/s, want %d and %.0f",
+				spelling, got.UncachedIOPS, got.UncachedMBps, want.UncachedIOPS, want.UncachedMBps)
+		}
+		// The catalog's own spelling comes back, so the finding quotes what the
+		// vendor documentation calls it and not what happened to be typed.
+		if got.Name != want.Name {
+			t.Errorf("%s: name = %q, want the catalog spelling %q", spelling, got.Name, want.Name)
+		}
+	}
+
+	// Folding case must not turn the lookup into a guess: absent stays absent.
+	if _, ok := c.AzureVMSizeOf("Standard_D999s_v9"); ok {
+		t.Error("an unknown size resolved through the case insensitive path")
+	}
+
+	// The gateway table has the same shape and the same exposure, and a module
+	// default of sku = "basic" is a sku the provider accepts.
+	for _, spelling := range []string{"basic", "BASIC", "vpngw1"} {
+		if _, ok := c.AzureVPNGateway(spelling); !ok {
+			t.Errorf("%s: no gateway entry, and the provider accepts this spelling", spelling)
+		}
+	}
+}
+
 // Azure rounds a disk up to the next offered size and serves it at that tier's
 // performance, so 200 GiB of Standard SSD is an E15 and not a proportional
 // slice of one.

@@ -3,6 +3,7 @@ package catalog
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -234,7 +235,47 @@ type azureTables struct {
 	aks      AzureAKS
 	disks    azDiskCatalog
 	vms      azVMCatalog
-	err      error
+
+	// Lowercased key back to the catalog's own spelling. Azure accepts a VM
+	// size and a gateway sku in any case, so a plan that writes one of them
+	// differently is not writing something unknown.
+	vmByFold  map[string]string
+	vpnByFold map[string]string
+
+	err error
+}
+
+// azFoldIndex builds the case insensitive index for a table.
+//
+// Two entries that differ only in case would make a folded lookup depend on map
+// iteration order, so that is a catalog error rather than a coin toss.
+func azFoldIndex[V any](m map[string]V, file string) (map[string]string, error) {
+	out := make(map[string]string, len(m))
+	for k := range m {
+		fold := strings.ToLower(k)
+		if other, clash := out[fold]; clash {
+			return nil, &azCatalogError{file: file, err: fmt.Errorf(
+				"%q and %q differ only in case, so a lookup cannot resolve either", other, k)}
+		}
+		out[fold] = k
+	}
+	return out, nil
+}
+
+// azCanonical resolves what a plan wrote to the key the catalog holds.
+//
+// Azure does not distinguish case in a VM size or a gateway sku, so neither
+// does this: a plan that writes Standard_E32s_V5 names a size the portal
+// accepts and the catalog already carries, and refusing it means the rule goes
+// quiet over a spelling. The catalog's own key comes back, so a finding quotes
+// the spelling the vendor documentation uses rather than the one that happened
+// to be typed.
+func azCanonical[V any](name string, table map[string]V, fold map[string]string) (string, bool) {
+	if _, ok := table[name]; ok {
+		return name, true
+	}
+	canonical, ok := fold[strings.ToLower(name)]
+	return canonical, ok
 }
 
 var (
@@ -264,6 +305,16 @@ func loadAzure() *azureTables {
 				t.err = &azCatalogError{file: step.name, err: err}
 				return
 			}
+		}
+
+		var err error
+		if t.vmByFold, err = azFoldIndex(t.vms.Sizes, "azure-vm.json"); err != nil {
+			t.err = err
+			return
+		}
+		if t.vpnByFold, err = azFoldIndex(t.network.VPN.SKUs, "azure-network.json"); err != nil {
+			t.err = err
+			return
 		}
 	})
 	return &azLoaded
@@ -351,11 +402,12 @@ func (c *Catalog) AzureAKS() AzureAKS { return loadAzure().aks }
 // generation.
 func (c *Catalog) AzureVPNGateway(sku string) (AzureVPNSKU, bool) {
 	t := loadAzure().network.VPN
-	entry, ok := t.SKUs[strings.TrimSpace(sku)]
+	name, ok := azCanonical(strings.TrimSpace(sku), t.SKUs, loadAzure().vpnByFold)
 	if !ok {
 		return AzureVPNSKU{}, false
 	}
-	entry.Name = strings.TrimSpace(sku)
+	entry := t.SKUs[name]
+	entry.Name = name
 	entry.Source, entry.VerifiedAt = t.Source, t.VerifiedAt
 	entry.Confidence, entry.Notes, entry.SKUNotes = t.Confidence, t.Notes, t.SKUNotes
 	return entry, true
@@ -462,11 +514,12 @@ func (c *Catalog) AzureDiskBurstNotes() string { return loadAzure().disks.BurstN
 // table is deliberately partial, so an unknown size means the rule stays quiet.
 func (c *Catalog) AzureVMSizeOf(size string) (AzureVMSize, bool) {
 	t := loadAzure().vms
-	entry, ok := t.Sizes[strings.TrimSpace(size)]
+	name, ok := azCanonical(strings.TrimSpace(size), t.Sizes, loadAzure().vmByFold)
 	if !ok {
 		return AzureVMSize{}, false
 	}
-	entry.Name = strings.TrimSpace(size)
+	entry := t.Sizes[name]
+	entry.Name = name
 	if series, known := t.Series[entry.Series]; known {
 		entry.Source, entry.VerifiedAt = series.Source, series.VerifiedAt
 		entry.Confidence, entry.SeriesNote = series.Confidence, series.Notes
