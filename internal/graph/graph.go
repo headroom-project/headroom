@@ -26,6 +26,17 @@ type Graph struct {
 	// becomes many real resources with different sizes and zones. Topology is
 	// keyed by the base address; capacity has to count the instances.
 	instances map[string][]map[string]any
+
+	// Module outputs, keyed by the address a caller writes
+	// ("module.compute.vm_id"), holding the addresses the output returns. An
+	// output that returns another module's output is normal, so resolving one
+	// is a walk and not a lookup.
+	outputs map[string][]string
+
+	// What a resource iterates over, per resource. A block that says each.value
+	// is naming an element of this collection, and without it the reference is
+	// unresolvable at the block level even though the plan states it plainly.
+	iter map[string][]string
 }
 
 func Build(f *plan.File) *Graph {
@@ -36,6 +47,8 @@ func Build(f *plan.File) *Graph {
 		values:    map[string]map[string]any{},
 		exprs:     map[string]map[string]any{},
 		instances: map[string][]map[string]any{},
+		outputs:   map[string][]string{},
+		iter:      map[string][]string{},
 	}
 
 	for _, r := range f.Resources() {
@@ -47,23 +60,79 @@ func Build(f *plan.File) *Graph {
 		}
 	}
 
+	// Outputs are indexed before any edge is drawn, because an edge that lands
+	// on one has to be expanded on the spot.
+	for _, o := range f.ConfigOutputs() {
+		for _, ref := range o.References {
+			to := normalize(ref, o.ModulePrefix)
+			if to == "" || to == o.Address {
+				continue
+			}
+			g.outputs[o.Address] = append(g.outputs[o.Address], to)
+		}
+	}
+
 	for _, r := range f.ConfigResources() {
 		from := plan.Base(r.Address)
 		g.types[from] = r.Type
 		g.exprs[from] = r.Expressions
 		modulePrefix := modulePrefixOf(from)
+		iterRefs := collectReferences(r.ForEachExpression)
+		iterRefs = append(iterRefs, collectReferences(r.CountExpression)...)
+		for _, ref := range iterRefs {
+			to := normalize(ref, modulePrefix)
+			if to == "" || to == from {
+				continue
+			}
+			g.iter[from] = append(g.iter[from], to)
+		}
+
 		refs := collectReferences(r.Expressions)
-		refs = append(refs, collectReferences(r.ForEachExpression)...)
-		refs = append(refs, collectReferences(r.CountExpression)...)
+		refs = append(refs, iterRefs...)
 		for _, ref := range refs {
 			to := normalize(ref, modulePrefix)
 			if to == "" || to == from {
 				continue
 			}
-			g.addEdge(from, to)
+			for _, real := range g.behind(to) {
+				if real != from {
+					g.addEdge(from, real)
+				}
+			}
 		}
 	}
 	return g
+}
+
+// behind resolves an address that names a module output into the resources the
+// output actually returns, following outputs that return other outputs for as
+// long as the chain runs. Anything that is not an output comes back unchanged.
+//
+// This is what lets a rule see across a module boundary. Terraform's plan says
+// the attachment references module.compute.vm_id and stops there; the resource
+// behind that name is in the module's own outputs, one hop away, and without
+// this hop every cross module edge dies on a name that has no type.
+func (g *Graph) behind(addr string) []string {
+	return g.resolveOutput(addr, map[string]bool{})
+}
+
+func (g *Graph) resolveOutput(addr string, seen map[string]bool) []string {
+	targets, isOutput := g.outputs[addr]
+	if !isOutput {
+		return []string{addr}
+	}
+	// An output cannot reach itself, but a plan is input this tool did not
+	// produce, so the cycle is guarded rather than assumed away.
+	if seen[addr] {
+		return nil
+	}
+	seen[addr] = true
+
+	var out []string
+	for _, t := range targets {
+		out = append(out, g.resolveOutput(t, seen)...)
+	}
+	return out
 }
 
 func (g *Graph) addEdge(from, to string) {
@@ -120,12 +189,25 @@ func (g *Graph) ReferencesIn(addr, t string, blocks ...string) []string {
 			continue
 		}
 		for _, ref := range collectReferences(node) {
-			to := normalize(ref, prefix)
-			if to == "" || to == base || seen[to] || g.types[to] != t {
-				continue
+			// A block whose value is each.value or each.key names an element of
+			// the collection the resource iterates over, so the reference the
+			// plan states lives in for_each and not in the block. Reading only
+			// the block leaves the edge unresolved on terraform that is entirely
+			// idiomatic: for_each over a map of disks, managed_disk_id =
+			// each.value.
+			candidates := []string{normalize(ref, prefix)}
+			if strings.HasPrefix(ref, "each.") || ref == "each" {
+				candidates = g.iter[base]
 			}
-			seen[to] = true
-			out = append(out, to)
+			for _, candidate := range candidates {
+				for _, to := range g.behind(candidate) {
+					if to == "" || to == base || seen[to] || g.types[to] != t {
+						continue
+					}
+					seen[to] = true
+					out = append(out, to)
+				}
+			}
 		}
 	}
 	sortStrings(out)
@@ -228,10 +310,22 @@ func normalize(ref, modulePrefix string) string {
 		}
 		return modulePrefix + strings.Join(parts[:3], ".")
 	case "module":
-		if len(parts) < 2 {
-			return ""
+		// module.compute.vm_id names an output, not a resource. Keep the whole
+		// address, nested module hops included, so the resource behind it can be
+		// resolved from the module's own outputs. Returning "module.compute"
+		// here is what used to end every cross module edge: that address has no
+		// type, so every type filter dropped it.
+		addr := modulePrefix
+		for len(parts) >= 2 && parts[0] == "module" {
+			addr += "module." + parts[1] + "."
+			parts = parts[2:]
 		}
-		return "module." + parts[1]
+		if len(parts) == 0 {
+			// A bare "module.x", naming the call rather than one of its
+			// outputs. There is nothing behind it to resolve.
+			return strings.TrimSuffix(addr, ".")
+		}
+		return addr + parts[0]
 	}
 	return modulePrefix + parts[0] + "." + parts[1]
 }

@@ -56,8 +56,32 @@ type Configuration struct {
 }
 
 type ConfigModule struct {
-	Resources   []ConfigResource      `json:"resources"`
-	ModuleCalls map[string]ModuleCall `json:"module_calls"`
+	Resources   []ConfigResource        `json:"resources"`
+	ModuleCalls map[string]ModuleCall   `json:"module_calls"`
+	Outputs     map[string]ConfigOutput `json:"outputs"`
+}
+
+// ConfigOutput is how a module hands a resource back to its caller. Without it
+// the reference graph stops at the module boundary: the caller writes
+// module.compute.vm_id and the plan shows only that name, never the resource
+// behind it.
+type ConfigOutput struct {
+	Expression map[string]any `json:"expression"`
+}
+
+// ConfigOutputRef is one module output, addressed the way a caller reaches it.
+type ConfigOutputRef struct {
+	// Address is what a caller writes, fully qualified: "module.compute.vm_id",
+	// or "module.a.module.b.vm_id" for a module inside a module.
+	Address string
+
+	// ModulePrefix is the prefix that turns a reference inside the declaring
+	// module into a fully qualified address, because an output's expression is
+	// written in the module's own scope.
+	ModulePrefix string
+
+	// References are the raw reference strings of the output expression.
+	References []string
 }
 
 type ModuleCall struct {
@@ -202,6 +226,49 @@ func (f *File) ConfigResources() []ConfigResource {
 		}
 	}
 	walk(f.Configuration.RootModule, "")
+	return out
+}
+
+// ConfigOutputs flattens every module output in the plan, addressed the way a
+// caller reaches it.
+//
+// The root module's own outputs are deliberately absent: nothing references
+// them, they are the end of the line rather than a step on the way to a
+// resource.
+func (f *File) ConfigOutputs() []ConfigOutputRef {
+	var out []ConfigOutputRef
+	var walk func(m ConfigModule, prefix string)
+	walk = func(m ConfigModule, prefix string) {
+		for name, call := range m.ModuleCalls {
+			inner := prefix + "module." + name + "."
+			for outName, o := range call.Module.Outputs {
+				out = append(out, ConfigOutputRef{
+					Address:      inner + outName,
+					ModulePrefix: inner,
+					References:   references(o.Expression),
+				})
+			}
+			walk(call.Module, inner)
+		}
+	}
+	walk(f.Configuration.RootModule, "")
+	return out
+}
+
+// references pulls the reference strings out of an expression node. Only the
+// top level is read: an output expression is a single expression, not a block
+// tree, and walking deeper would collect references the output does not return.
+func references(expr map[string]any) []string {
+	raw, ok := expr["references"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, r := range raw {
+		if s, ok := r.(string); ok {
+			out = append(out, s)
+		}
+	}
 	return out
 }
 
