@@ -22,6 +22,7 @@ import (
 	"github.com/headroom-project/headroom/internal/plan"
 	"github.com/headroom-project/headroom/internal/report"
 	"github.com/headroom-project/headroom/internal/rules"
+	"github.com/headroom-project/headroom/internal/update"
 	"github.com/headroom-project/headroom/internal/upload"
 )
 
@@ -55,7 +56,13 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 		return exitOK, nil
 	}
 	if args[0] == "version" || args[0] == "--version" {
+		// The one command where waiting for the answer is the point. There is
+		// no analysis to overlap with, so this is a plain synchronous check
+		// with the same budget, and somebody who typed "version" is asking the
+		// question the check answers.
+		probe := update.Start(update.Config{Current: version, Enabled: update.Wanted(stderr, false)})
 		fmt.Fprintln(stdout, "headroom "+version)
+		probe.Notify(stderr)
 		return exitOK, nil
 	}
 	if args[0] != "analyze" {
@@ -77,6 +84,7 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 	configPath := fs.String("config", os.Getenv("HEADROOM_CONFIG"), "path to headroom.yaml (default: discovered next to the plan, then in the working directory)")
 	noConfig := fs.Bool("no-config", false, "ignore any headroom.yaml and run the built-in rules at their defaults")
 	noColor := fs.Bool("no-color", false, "never colour the report (also honoured: NO_COLOR)")
+	noUpdateCheck := fs.Bool("no-update-check", false, "never ask GitHub whether a newer headroom exists (also honoured: HEADROOM_NO_UPDATE_CHECK, CI)")
 	// The empty report has always told the reader to run this, and until now the
 	// flag did not exist, so following the instruction printed a parse error and
 	// exited 2. Silence is a claim and this is where it gets its evidence.
@@ -118,6 +126,17 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 			return exitError, err
 		}
 	}
+
+	// Started once the invocation is known to be a real run, and read at the
+	// very end, so the question travels alongside the analysis instead of in
+	// front of it. See internal/update: it runs only for a person at a
+	// terminal, sends nothing about them, writes only to stderr, and is
+	// abandoned rather than waited on if it is slow.
+	probe := update.Start(update.Config{
+		Current: version,
+		Enabled: update.Wanted(stderr, *noUpdateCheck),
+	})
+	defer probe.Notify(stderr)
 
 	planPath := fs.Arg(0)
 
@@ -371,6 +390,11 @@ flags:
   --explain       write to stderr what each rule did with this plan: what it
                   reported, what it looked at and could not use, and why. An
                   empty report and an unanchored one look identical without it
+  --no-update-check
+                  never ask GitHub whether a newer headroom exists. The check
+                  is already off unless stderr is a terminal, so it never runs
+                  in CI or through a pipe. HEADROOM_NO_UPDATE_CHECK=1 does the
+                  same, and so does CI in the environment
 
 exit codes:
   0  ran, and nothing matched --fail-on
@@ -384,5 +408,11 @@ stderr. Uploading is one attempt with a 30s timeout and no retry.
 The plan file never leaves this machine. Only an allowlisted set of capacity
 attributes is ever read; run --dry-run to see exactly what that is, and
 --upload sends those same bytes and no others.
+
+Two things here open a socket, and nothing else does. --upload, which you ask
+for. And the update check, at most once a day, only when a person is at the
+terminal: one anonymous GET to the public release list, carrying no version, no
+identifier and nothing about you or your plan. It downloads nothing and
+installs nothing.
 `)
 }

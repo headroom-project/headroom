@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/headroom-project/headroom/internal/update"
 )
 
 // The CLI is the whole product surface for a free user, and until this file
@@ -178,6 +180,38 @@ func TestWithoutFailOnEvenACriticalPlanExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(r.stdout, "CRITICAL") {
 		t.Error("the critical findings were not reported")
+	}
+}
+
+// --- the update check -----------------------------------------------------
+
+// The check is wired into the CLI with a defer, so it runs on every exit path
+// including the error ones. What keeps it out of a pipeline is the writer the
+// CLI hands it, and this is the test that pins the coupling: the thing run()
+// passes as stderr in every test in this file is exactly the thing that makes
+// the answer no.
+func TestTheUpdateCheckIsOffForAnythingThatIsNotATerminal(t *testing.T) {
+	var stderr bytes.Buffer
+	if update.Wanted(&stderr, false) {
+		t.Fatal("the CLI would open a socket when its stderr is a buffer, a pipe or a CI log")
+	}
+}
+
+// A run that says nothing must say nothing. The notice lives on stderr, so
+// stdout stays byte for byte what --json and --dry-run promise, and the whole
+// audit story rests on that promise.
+func TestAQuietRunPrintsNothingExtraOnStdout(t *testing.T) {
+	cleanEnv(t)
+	r := exec(t, "analyze", "--json", fixtureQuiet)
+	if r.code != exitOK {
+		t.Fatalf("exit %d, stderr: %s", r.code, r.stderr)
+	}
+	var findings []any
+	if err := json.Unmarshal([]byte(r.stdout), &findings); err != nil {
+		t.Fatalf("stdout is not the JSON it promises to be: %v\n%s", err, r.stdout)
+	}
+	if strings.Contains(r.stdout, "is available") {
+		t.Errorf("an update notice reached stdout:\n%s", r.stdout)
 	}
 }
 
@@ -478,6 +512,11 @@ func cleanEnv(t *testing.T) {
 	for _, k := range []string{"HEADROOM_API_KEY", "HEADROOM_API_URL", "HEADROOM_SALT", "HEADROOM_CONFIG"} {
 		t.Setenv(k, "")
 	}
+	// Set to anything at all, including empty, means the update check is off.
+	// It is already off in here because a bytes.Buffer is not a terminal; this
+	// is the second lock on the same door, so that no test in this file can
+	// ever be the reason a socket opens.
+	t.Setenv("HEADROOM_NO_UPDATE_CHECK", "")
 }
 
 // The one rule the whole audit story rests on. If the bytes on the wire can
