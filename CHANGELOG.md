@@ -4,6 +4,9 @@ Notable changes per release. Dates are the tag date.
 
 ## v0.2.0, 2026-08-16
 
+Carries three pull requests: `--upload`, colour in the report, and the work
+below.
+
 The release that came out of running the tool against seven real production
 plans from a live Azure estate. It reported nothing on all seven and exited 0 on
 all seven, including under `--fail-on warning`, and the infrastructure was not
@@ -79,6 +82,17 @@ produced an `xid` now produce one.
 
 ### Added
 
+- **`--upload`**, which sends the redacted payload to the headroom API after
+  printing the local report. It refuses to run alongside `--dry-run`, refuses to
+  send anything without a salt and has no flag that permits it, and refuses
+  without an API key. The bytes it sends are the bytes `--dry-run` prints, from
+  one function and one call site, so a customer can audit an upload by
+  rehearsing it. When the gate fires and the upload fails, exit 1 wins over exit
+  2: a network failure must not be able to launder a finding into a shrug.
+- **Colour in the terminal report.** Severity is coloured and nothing else is,
+  in eight colour ANSI. Stripping the escapes returns the uncoloured report byte
+  for byte. `NO_COLOR` is honoured, `--no-color` turns it off, and colour is off
+  automatically when stdout is not a terminal.
 - **`--explain`**, which writes to stderr what each rule did with this plan:
   what it reported, what it looked at and could not use, and why. The empty
   report has always told the reader to run it and the flag did not exist, so
@@ -110,5 +124,4 @@ produced an `xid` now produce one.
 
 First release. Rules R1 to R8 on AWS, AZ1 to AZ6 on Azure and GC1 to GC6 on
 Google Cloud, a catalog where every figure carries the vendor page it came from,
-`--json`, `--fail-on`, `--dry-run` and `--upload`, signed archives with an SBOM
-per file.
+`--json`, `--fail-on` and `--dry-run`, signed archives with an SBOM per file.
