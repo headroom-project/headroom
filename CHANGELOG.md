@@ -2,7 +2,11 @@
 
 Notable changes per release. Dates are the tag date.
 
-## Unreleased
+## v0.4.0, 2026-08-20
+
+One feature and one fix. The feature is a second way to run this that does not
+need installing it; the fix is a flag that did not work in the command whose
+own output told you to use it.
 
 ### Added
 - **A WebAssembly build of the analyzer**, published as `headroom_web`. It is
