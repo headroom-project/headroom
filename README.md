@@ -105,7 +105,7 @@ Two things in this binary open a socket, and nothing else does. `--upload`, whic
 
 ### The browser build
 
-The same analyzer is published as `headroom_web`, a WebAssembly module. It is what the playground at [headroomcli.com](https://headroomcli.com/playground) runs, and it exists so you can try this on a real plan before installing anything.
+The same analyzer is published as `headroom_web.wasm`, a WebAssembly module. It is what the playground at [headroomcli.com](https://headroomcli.com/playground) runs, and it exists so you can try this on a real plan before installing anything.
 
 The property above survives the move. The module has no network in it at all: `internal/update`, `internal/upload` and `os/exec` are not in its import graph, so there is nothing that can open a socket even by accident. A plan pasted into that page is decoded in the tab and is gone when the tab is, and the report it prints is byte identical to the one you get here, because it is the same renderer and not a second implementation of it.
 
