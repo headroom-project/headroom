@@ -60,7 +60,19 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 		// no analysis to overlap with, so this is a plain synchronous check
 		// with the same budget, and somebody who typed "version" is asking the
 		// question the check answers.
-		probe := update.Start(update.Config{Current: version, Enabled: update.Wanted(stderr, false)})
+		//
+		// What it must not do is answer that question for somebody who said
+		// not to. Until v0.3.0 this line passed a literal false to Wanted and
+		// nothing here parsed a flag, so `headroom version --no-update-check`
+		// printed the notice, opened the socket and wrote the cache, and the
+		// notice it printed ended with "silence this with --no-update-check".
+		// The instruction the tool prints did not work in the command that
+		// printed it, and a request the user declined was made anyway.
+		noUpdateCheck, err := parseVersionFlags(args[1:], stderr)
+		if err != nil {
+			return exitError, err
+		}
+		probe := update.Start(update.Config{Current: version, Enabled: update.Wanted(stderr, noUpdateCheck)})
 		fmt.Fprintln(stdout, "headroom "+version)
 		probe.Notify(stderr)
 		return exitOK, nil
@@ -259,6 +271,33 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 		return exitError, nil
 	}
 	return exitOK, nil
+}
+
+// parseVersionFlags reads what was typed after `version`.
+//
+// A flag set rather than a string comparison, for the same reason `analyze` has
+// one: a comparison accepts `--no-update-check` and silently ignores
+// `--no-update-chekc`, and silently ignoring a flag somebody typed is the whole
+// defect this exists to close. A flag set refuses what it does not know, and
+// refuses a stray word too, so `headroom version --json` now says so instead of
+// exiting 0 as though it had done something.
+//
+// There is nothing secret in this flag set, so PrintDefaults writing it to
+// stderr on a parse error is harmless here. That is not true of the analyze
+// set, which is why the salt and the API key are read from the environment
+// after Parse and never used as a default.
+func parseVersionFlags(args []string, stderr io.Writer) (bool, error) {
+	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	noUpdateCheck := fs.Bool("no-update-check", false,
+		"never ask GitHub whether a newer headroom exists (also honoured: HEADROOM_NO_UPDATE_CHECK, CI)")
+	if err := fs.Parse(args); err != nil {
+		return false, err
+	}
+	if fs.NArg() != 0 {
+		return false, fmt.Errorf("version takes no arguments, got %q", fs.Arg(0))
+	}
+	return *noUpdateCheck, nil
 }
 
 // payloadJSON renders the redacted payload.

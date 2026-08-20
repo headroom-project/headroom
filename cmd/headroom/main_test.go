@@ -1039,3 +1039,88 @@ func TestExplainNeverChangesTheVerdict(t *testing.T) {
 		}
 	}
 }
+
+// --- version honours what was typed ---------------------------------------
+
+// The defect this covers shipped in v0.3.0 and was reproduced against the
+// published binary: `headroom version --no-update-check` printed the notice,
+// sent the request and wrote the cache. The version branch handed
+// update.Wanted a literal false and never parsed a flag at all, so the one
+// instruction the notice prints, "silence this with --no-update-check", did not
+// work in the command that printed it. Somebody who typed the flag asked for no
+// network and got network.
+func TestVersionParsesTheUpdateCheckFlag(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"nothing typed", nil, false},
+		{"the flag", []string{"--no-update-check"}, true},
+		{"the single dash spelling", []string{"-no-update-check"}, true},
+		{"the explicit true", []string{"--no-update-check=true"}, true},
+		{"the explicit false", []string{"--no-update-check=false"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var errb bytes.Buffer
+			got, err := parseVersionFlags(tc.args, &errb)
+			if err != nil {
+				t.Fatalf("parseVersionFlags(%q) errored: %v", tc.args, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseVersionFlags(%q) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// A flag that does not exist, and a stray word, are both mistakes. Before the
+// fix `headroom version --anything` exited 0 without a word, which is the same
+// class of silence as the flag being ignored.
+func TestVersionRefusesWhatItCannotUnderstand(t *testing.T) {
+	for _, args := range [][]string{
+		{"version", "--no-update-chekc"},
+		{"version", "--json"},
+		{"version", "extra"},
+		{"--version", "--nonsense"},
+	} {
+		r := exec(t, args...)
+		if r.code != exitError {
+			t.Errorf("%q: code = %d, want %d", args, r.code, exitError)
+		}
+	}
+}
+
+// The flag reaching the parser is half of it. This is the other half: that the
+// value it parsed is what decides whether a socket is opened.
+//
+// update.Wanted answers false for anything that is not a character device, and
+// a test writes into a buffer, so the interesting branch is unreachable without
+// one. os.DevNull is a character device on the platforms this runs on, which
+// makes it the cheapest honest stand-in for a terminal. Where it is not, the
+// assertion is skipped rather than quietly weakened.
+func TestVersionFlagDecidesWhetherTheCheckRuns(t *testing.T) {
+	t.Setenv("HEADROOM_NO_UPDATE_CHECK", "")
+	os.Unsetenv("HEADROOM_NO_UPDATE_CHECK")
+	t.Setenv("CI", "")
+	os.Unsetenv("CI")
+
+	device, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skipf("no %s to stand in for a terminal: %v", os.DevNull, err)
+	}
+	defer device.Close()
+
+	if !update.Wanted(device, false) {
+		t.Skipf("%s is not reported as a character device here, so there is no terminal to stand in", os.DevNull)
+	}
+
+	noUpdateCheck, err := parseVersionFlags([]string{"--no-update-check"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if update.Wanted(device, noUpdateCheck) {
+		t.Fatal("the check is still enabled with --no-update-check on a terminal, which is the defect")
+	}
+}
