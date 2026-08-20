@@ -2,6 +2,25 @@
 
 Notable changes per release. Dates are the tag date.
 
+## Unreleased
+
+### Fixed
+
+- **`headroom version --no-update-check` ignored the flag.** The notice printed,
+  the request went out and the cache was written, with the flag typed. The
+  version branch handed `update.Wanted` a literal `false` and parsed no flags at
+  all, so the one instruction the notice ends with, "silence this with
+  --no-update-check", did not work in the command that printed it. Somebody who
+  typed the flag asked for no network and got network.
+
+  `headroom version --anything` also exited 0 without a word, for the same
+  reason. It now refuses a flag it does not know and a stray argument, the way
+  `analyze` already did.
+
+  `HEADROOM_NO_UPDATE_CHECK=1`, `CI` and a pipe were never affected, and
+  `analyze` always honoured the flag. Reproduced against the published v0.3.0
+  binary, not only against a build from source.
+
 ## v0.3.0, 2026-08-20
 
 One feature, and it is there because a capacity ceiling is a claim about a
