@@ -9,3 +9,10 @@ coverage.out
 tfplan
 *.tfstate
 *.tfstate.backup
+
+# CLAUDE.md is the local operating note for this working copy: how to run the
+# suite through WSL on a machine where Application Control blocks unsigned
+# binaries, and which rules of this project are not up for negotiation. It is
+# not documentation for anybody who clones this, and this repository is public,
+# so it stays out of the tree rather than relying on nobody typing `git add .`.
+CLAUDE.md
