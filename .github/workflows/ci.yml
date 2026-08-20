@@ -84,6 +84,18 @@ jobs:
             echo "ok $target"
           done
 
+      # The browser build is behind a `js && wasm` build tag, so every other
+      # job in this file skips it: `go vet ./...` and `go test ./...` see a
+      # package with no files for their platform and move on. Without this step
+      # a change that breaks it is invisible here and surfaces on the website,
+      # which is the wrong repository to find it in.
+      - name: build the browser target
+        run: |
+          set -euo pipefail
+          GOOS=js GOARCH=wasm go vet ./cmd/headroom-wasm
+          GOOS=js GOARCH=wasm go build -trimpath -o /dev/null ./cmd/headroom-wasm
+          echo "ok js/wasm"
+
   fuzz:
     name: fuzz the parser
     runs-on: ubuntu-latest

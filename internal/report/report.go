@@ -21,7 +21,27 @@ var label = map[string]string{
 // noColor forces plain output. When it is false the decision is still made by
 // wantColour, which honours NO_COLOR and refuses to write escapes into a pipe.
 func Text(w io.Writer, findings []rules.Finding, planPath string, noColor bool) {
-	p := palette{on: wantColour(w, noColor)}
+	write(w, findings, planPath, wantColour(w, noColor))
+}
+
+// Coloured writes the same report with the colour decision handed in rather
+// than read off the environment.
+//
+// It exists for a caller that is not a process. The WebAssembly build has no
+// terminal, no NO_COLOR and no pipe to inspect, and it wants the escapes
+// because the page it draws into renders them. Making that caller set an
+// environment variable to reach the coloured path would put a global mutation
+// in the middle of a library, and it would leave the colour of a report
+// depending on the order two callers ran in.
+//
+// Text and Coloured share one body, so the bytes they emit for the same
+// decision cannot drift apart.
+func Coloured(w io.Writer, findings []rules.Finding, planPath string, colour bool) {
+	write(w, findings, planPath, colour)
+}
+
+func write(w io.Writer, findings []rules.Finding, planPath string, colour bool) {
+	p := palette{on: colour}
 
 	fmt.Fprintf(w, "%s  %s\n\n", p.s(styBold, "headroom"), p.s(styDim, planPath))
 

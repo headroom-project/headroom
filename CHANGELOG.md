@@ -4,8 +4,30 @@ Notable changes per release. Dates are the tag date.
 
 ## Unreleased
 
-### Fixed
+### Added
+- **A WebAssembly build of the analyzer**, published as `headroom_web`. It is
+  the same parser, graph, rules, catalog and renderer compiled for a browser,
+  so the report it produces is byte identical to the one the binary prints,
+  escapes included. It exists so somebody can try the tool on their own plan
+  before installing anything, which is what the playground on headroomcli.com
+  runs.
 
+  It is not a service and it cannot become one. `internal/update`,
+  `internal/upload` and `os/exec` are absent from its import graph, so there is
+  nothing in the module that can open a socket: a plan handed to it is decoded
+  in the tab it was pasted into and is gone with the page. The module is listed
+  in `checksums.txt` like every other artifact, so the site that serves it can
+  pin bytes this repository's release workflow produced.
+
+  The analysis itself is in `internal/webrun`, which is ordinary Go and is
+  covered by the suite. `cmd/headroom-wasm` is a binding with no decisions in
+  it, because a package behind a `js && wasm` build tag cannot be tested by
+  `go test` on any platform this project runs CI on.
+
+  A browser build refuses a plan over 8 MB and says why: that is a budget of
+  the tab, not of the analysis, and the binary has no such limit.
+
+### Fixed
 - **`headroom version --no-update-check` ignored the flag.** The notice printed,
   the request went out and the cache was written, with the flag typed. The
   version branch handed `update.Wanted` a literal `false` and parsed no flags at
@@ -20,6 +42,15 @@ Notable changes per release. Dates are the tag date.
   `HEADROOM_NO_UPDATE_CHECK=1`, `CI` and a pipe were never affected, and
   `analyze` always honoured the flag. Reproduced against the published v0.3.0
   binary, not only against a build from source.
+
+### Internal
+- `report.Coloured` takes the colour decision as an argument. `report.Text`
+  still reads the environment and both share one body, so the bytes cannot
+  drift. The browser has no terminal to detect, no `NO_COLOR` and no pipe, and
+  the alternative was a library that mutates the environment of its caller.
+- CI builds `js/wasm`. Every other job skips that package, because a build tag
+  makes it invisible to `go vet ./...` and `go test ./...`, and a break in it
+  would otherwise surface in the website's repository instead of this one.
 
 ## v0.3.0, 2026-08-20
 

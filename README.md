@@ -103,6 +103,14 @@ One dependency, `gopkg.in/yaml.v3`, which has no dependencies of its own. Everyt
 
 Two things in this binary open a socket, and nothing else does. `--upload`, which you ask for. And the update check below, which you can switch off.
 
+### The browser build
+
+The same analyzer is published as `headroom_web`, a WebAssembly module. It is what the playground at [headroomcli.com](https://headroomcli.com/playground) runs, and it exists so you can try this on a real plan before installing anything.
+
+The property above survives the move. The module has no network in it at all: `internal/update`, `internal/upload` and `os/exec` are not in its import graph, so there is nothing that can open a socket even by accident. A plan pasted into that page is decoded in the tab and is gone when the tab is, and the report it prints is byte identical to the one you get here, because it is the same renderer and not a second implementation of it.
+
+It is listed in `checksums.txt` alongside the binaries, so a site serving it can pin bytes this repository's release workflow produced. Instantiating it needs the `wasm_exec.js` from the Go toolchain it was built with, which ships with Go rather than with this release.
+
 ## The update check
 
 A capacity ceiling is a claim about a provider, and providers move theirs: a quota is raised, an instance family is added, a limit page is rewritten, a terraform provider renames the attribute a rule reads. The catalog inside an old binary answers with the old number, in the same confident format as the correct one, and a wrong ceiling looks exactly like a right one at the point of use. So headroom mentions when a newer release exists. That is a correctness signal, not a nag, and the notice says so.
