@@ -86,6 +86,7 @@ tool failure would hand CI the one signal that invites it to ignore the finding.
 | `--warn-at R` | utilization ratio that triggers a warning (default 0.8) |
 | `--salt S` | per-organization salt for hashing addresses (env `HEADROOM_SALT`) |
 | `--fail-on SEV` | exit 1 on `critical`, or on `warning` and worse |
+| `--no-update-check` | never ask GitHub whether a newer headroom exists (env `HEADROOM_NO_UPDATE_CHECK`) |
 
 ## Your plan file never leaves your machine
 
@@ -98,7 +99,26 @@ The CLI parses locally and reads by **allowlist, never denylist**. Terraform pla
 
 Said plainly, because a privacy claim that overstates itself is worse than one that does not: the allowlisted attributes travel **with their real values**. A subnet CIDR, an instance class and an allocated storage size are in the payload as themselves, because the ceiling cannot be recomputed without them. What is hashed is identity, not shape. Run `--dry-run` and you are looking at all of it.
 
-One dependency, `gopkg.in/yaml.v3`, which has no dependencies of its own. Everything else is the standard library, because this runs inside customer environments and every transitive dependency is supply-chain surface someone has to defend during a security review. The CLI makes no network calls at all unless you ask it to upload.
+One dependency, `gopkg.in/yaml.v3`, which has no dependencies of its own. Everything else is the standard library, because this runs inside customer environments and every transitive dependency is supply-chain surface someone has to defend during a security review.
+
+Two things in this binary open a socket, and nothing else does. `--upload`, which you ask for. And the update check below, which you can switch off.
+
+## The update check
+
+A capacity ceiling is a claim about a provider, and providers move theirs: a quota is raised, an instance family is added, a limit page is rewritten, a terraform provider renames the attribute a rule reads. The catalog inside an old binary answers with the old number, in the same confident format as the correct one, and a wrong ceiling looks exactly like a right one at the point of use. So headroom mentions when a newer release exists. That is a correctness signal, not a nag, and the notice says so.
+
+What it does, stated so it can be checked:
+
+- **It runs only when a person is at the terminal.** Not in CI, not through a pipe, not from cron. The test is whether stderr is a character device, plus `CI` in the environment as a second refusal.
+- **At most once a day.** The answer is cached in `headroom/update-check.json` under the OS cache directory (`$XDG_CACHE_HOME` or `~/.cache` on Linux, `~/Library/Caches` on macOS, `%LocalAppData%` on Windows), mode `0600`. A failed check is remembered too, for four hours, so a rate limit costs one request rather than one per run.
+- **One anonymous `GET`** to `https://api.github.com/repos/headroom-project/headroom/releases/latest`. No query string, no identifier, and the `User-Agent` is the constant `headroom` with no version in it, so the request says nothing about you or your build. There is no flag or environment variable that repoints it.
+- **It downloads nothing and installs nothing.** It prints a sentence. A binary that can replace itself is a supply chain with one link and no review, and this project signs its releases precisely so that installing stays a decision you make.
+- **It cannot fail or slow a run.** The check rides alongside the analysis rather than in front of it, it is abandoned rather than waited on, and every error path in it ends in silence. Exit codes are untouched.
+- **It never writes to stdout.** The notice is on stderr, so `--json` and `--dry-run` stay byte for byte what they promise.
+
+Turn it off with `--no-update-check`, or `HEADROOM_NO_UPDATE_CHECK=1`, which the notice itself tells you.
+
+A build from source reports its version as `dev`, which has no place on the number line, so it is never told anything and never asks.
 
 ## Uploading
 
