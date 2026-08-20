@@ -2,7 +2,11 @@
 
 Notable changes per release. Dates are the tag date.
 
-## Unreleased
+## v0.3.0, 2026-08-20
+
+One feature, and it is there because a capacity ceiling is a claim about a
+provider and providers move theirs. Everything else in this release is the work
+of keeping that feature from costing anything.
 
 ### Added
 
@@ -26,6 +30,9 @@ Notable changes per release. Dates are the tag date.
 
 - TTY detection moved to `internal/tty`, so colour and the update check cannot
   answer "is a person watching" differently.
+- `goreleaser-action` pinned to v7.2.3. The major bump is the node 24 runtime
+  and nothing else, and the release ran end to end on it, publishing skipped and
+  signing not skipped, before this tag existed.
 
 ## v0.2.0, 2026-08-16
 
