@@ -9,7 +9,7 @@ need installing it; the fix is a flag that did not work in the command whose
 own output told you to use it.
 
 ### Added
-- **A WebAssembly build of the analyzer**, published as `headroom_web`. It is
+- **A WebAssembly build of the analyzer**, published as `headroom_web.wasm`. It is
   the same parser, graph, rules, catalog and renderer compiled for a browser,
   so the report it produces is byte identical to the one the binary prints,
   escapes included. It exists so somebody can try the tool on their own plan

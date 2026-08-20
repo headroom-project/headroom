@@ -74,6 +74,11 @@ archives:
   - id: headroom-wasm
     ids: [headroom-wasm]
     formats: [binary]
+    # GoReleaser appends the platform extension for js/wasm, so what is
+    # published is headroom_web.wasm. The name is written out in the footer and
+    # in the README because it is the string a consumer has to match against
+    # checksums.txt, and getting it wrong looks exactly like a release that
+    # predates this build.
     name_template: "headroom_web"
 
 checksum:
@@ -146,7 +151,7 @@ release:
 
     An SBOM in SPDX form ships next to every archive.
 
-    `headroom_web` is the same analyzer compiled to WebAssembly. It is what the
+    `headroom_web.wasm` is the same analyzer compiled to WebAssembly. It is what the
     playground on headroomcli.com runs, it is listed in `checksums.txt` like
     every other artifact, and it opens no socket: it takes a plan document as a
     string and returns the report. Instantiating it needs the `wasm_exec.js`
