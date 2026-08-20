@@ -28,6 +28,29 @@ builds:
       - goos: windows
         goarch: arm64
 
+  # The same analyzer compiled for a browser. It is what the playground on
+  # headroomcli.com runs, and it is published here rather than built on the
+  # website's machine so that the module the site serves is the module this
+  # workflow produced, named in checksums.txt and covered by the signature over
+  # it. A website pinning a hash it computed itself pins nothing.
+  #
+  # The loader that instantiates it (wasm_exec.js) is not published here. It
+  # belongs to the Go toolchain, it has to match the compiler that produced the
+  # module, and redistributing somebody else's file from a release that claims
+  # to be built from this tree would be the one artifact here nobody could
+  # trace back to a commit.
+  - id: headroom-wasm
+    main: ./cmd/headroom-wasm
+    binary: headroom
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos: [js]
+    goarch: [wasm]
+
 archives:
   - id: headroom
     ids: [headroom]
@@ -44,6 +67,14 @@ archives:
       - NOTICE
       - README.md
       - headroom.example.yaml
+
+  # The wasm module ships as the bare file. An archive would make the website
+  # unpack a tarball to serve one asset, and the point of publishing it is that
+  # the bytes on the release page are the bytes the browser fetches.
+  - id: headroom-wasm
+    ids: [headroom-wasm]
+    formats: [binary]
+    name_template: "headroom_web"
 
 checksum:
   name_template: checksums.txt
@@ -114,3 +145,10 @@ release:
     ```
 
     An SBOM in SPDX form ships next to every archive.
+
+    `headroom_web` is the same analyzer compiled to WebAssembly. It is what the
+    playground on headroomcli.com runs, it is listed in `checksums.txt` like
+    every other artifact, and it opens no socket: it takes a plan document as a
+    string and returns the report. Instantiating it needs the `wasm_exec.js`
+    that ships with the Go toolchain the module was built with, which is why
+    that file is not published here.
